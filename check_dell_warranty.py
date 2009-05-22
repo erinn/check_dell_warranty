@@ -1,0 +1,139 @@
+#!/usr/bin/env python
+
+#=============================================================================
+# Nagios plugin to pull the Dell service tag and check it 
+# against Dell's website to see how many days remain. By default it 
+# issues a warning when there is less than thirty days remaining and critical when 
+# there is less than ten days remaining. These values can be adjusted using
+# the command line, see --help.                                                 
+# Version: 1.0                                                                
+# Created: 2009-02-12                                                         
+# Author: Erinn Looney-Triggs                                                 
+# Revised:                                                                    
+# Revised by:                                                                 
+# Revision history:                                                           
+#=============================================================================
+
+import re
+import subprocess
+import sys
+import urllib2
+
+#Nagios exit codes in English
+UNKNOWN  = 3
+CRITICAL = 2
+WARNING  = 1
+OK       = 0
+
+
+def extract_serial_number():
+    '''Extracts the serial number from the localhost using dmidecode.
+    
+    This function takes no arguments but expects dmidecode to exist and
+    also expects dmidecode to accept -s system-serial-number
+    
+    '''
+    
+    #Gather the information from dmidecode
+    try:
+        p = subprocess.Popen(["sudo", "dmidecode", "-s",
+                               "system-serial-number"], 
+                               stdout=subprocess.PIPE, 
+                               stderr=subprocess.PIPE)
+    except OSError:
+        print 'Error:', sys.exc_value, 'exiting!'
+        sys.exit(1)
+    
+    #Strip the newline off of result
+    serial_number = p.stdout.read()
+    
+    #Basic check of the serial number, can they be longer, maybe
+    if len( serial_number.strip() ) != 7:
+        print 'Invalid serial number:%s exiting!' % (serial_number)
+        sys.exit(WARNING)
+    
+    return serial_number.strip()
+
+def get_warranty(serial_number):
+    #The URL to Dell's site
+    dell_url='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?c=us&l=en&s=gen&ServiceTag='
+
+    #Regex to pull the information from Dell's site
+    pattern=r""".*>                          #Match anything up to >
+                (\d{1,2}/\d{1,2}/\d{4})<     #Match North American style date
+                .*>(\d{1,2}/\d{1,2}/\d{4})<  #Match date, good for 8000 years
+                .*>                          #Match anything up to >
+                (\d+)                        #Match number of days
+                <.*                          #Match <and the rest of the line
+                """
+    
+    #Build the full URL
+    full_url = dell_url + serial_number
+    
+    #Try to open the page, exit on failure
+    try:
+        response = urllib2.urlopen(full_url)
+    except URLError:
+        print 'Unable to open URL: %s exiting!' % (full_url)
+        sys.exit(UNKNOWN)
+    
+    #Build our regex
+    regex = re.compile(pattern, re.X)
+
+    #Gather the results returns a list of tuples
+    result = regex.findall(response.read())
+    
+    return result
+
+def parse_exit(result):
+    if len(result) == 0:
+        print "Dell's database appears to be down for this system."
+        sys.exit(WARNING)
+    
+    start_date, end_date, days_left = result[0]
+    
+    if days_left < options.critical_days:
+        print 'Warranty start date: %s End date: %s Days left: %s' \
+        % (start_date, end_date, days_left)
+        sys.exit(CRITICAL)
+    elif days_left < options.warning_days:
+        print 'Warranty start date: %s End date: %s Days left: %s' \
+        % (start_date, end_date, days_left)
+        sys.exit(WARNING)
+    else:
+        print 'Warranty start date: %s End date: %s Days left: %s' \
+        % (start_date, end_date, days_left)
+        sys.exit(OK)
+        
+def sigalarm_handler(signum, frame):
+    print '%s timed out after %d seconds' % (sys.argv[0], options.timeout)
+    sys.exit(CRITICAL)
+    
+if __name__ == '__main__':
+    import csv
+    import optparse
+    import signal
+
+    parser = optparse.OptionParser(version="%prog 1.0")
+    parser.add_option('-c', '--critical', dest='critical_days', default=10,
+                     help='Number of days under which to return critical \
+                     (Default: 10)', type='int')
+    parser.add_option('-t', '--timeout', dest='timeout', default=10,
+                      help='Set the timeout for the program to run \
+                      (Default: 10 seconds)', type='int')
+    parser.add_option('-w', '--warning', dest='warning_days', default=30,
+                      help='Number of days under which to return a warning \
+                      (Default: 30)', type='int' )
+    
+    (options, args) = parser.parse_args()
+    
+    signal.signal(signal.SIGALRM, sigalarm_handler)
+    signal.alarm(options.timeout)
+    
+    serial_number = extract_serial_number()
+    
+    result = get_warranty(serial_number)
+    
+    parse_exit(result)
+    
+    signal.alarm(0)
