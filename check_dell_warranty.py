@@ -6,12 +6,28 @@
 # issues a warning when there is less than thirty days remaining and critical when 
 # there is less than ten days remaining. These values can be adjusted using
 # the command line, see --help.                                                 
-# Version: 1.0                                                                
+# Version: 1.1                                                                
 # Created: 2009-02-12                                                         
 # Author: Erinn Looney-Triggs                                                 
-# Revised:                                                                    
-# Revised by:                                                                 
-# Revision history:                                                           
+# Revised: 2009-05-27                                                                
+# Revised by: Erinn Looney-Triggs                                                                 
+# Revision history:
+# 1.1 Fixed string conversions to do int comparisons properly. Remove import
+# csv as I am not using that yet. Add a license to the file.  
+# License:
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#                                       
 #=============================================================================
 
 import re
@@ -66,8 +82,9 @@ def get_warranty(serial_number):
                 (\d+)                        #Match number of days
                 <.*                          #Match <and the rest of the line
                 """
+    #serial_number = '6MMDM51'
     
-    #Build the full URL
+    #Build the full
     full_url = dell_url + serial_number
     
     #Try to open the page, exit on failure
@@ -92,11 +109,11 @@ def parse_exit(result):
     
     start_date, end_date, days_left = result[0]
     
-    if days_left < options.critical_days:
+    if int(days_left) < options.critical_days:
         print 'Warranty start date: %s End date: %s Days left: %s' \
         % (start_date, end_date, days_left)
         sys.exit(CRITICAL)
-    elif days_left < options.warning_days:
+    elif int(days_left) < options.warning_days:
         print 'Warranty start date: %s End date: %s Days left: %s' \
         % (start_date, end_date, days_left)
         sys.exit(WARNING)
@@ -110,11 +127,10 @@ def sigalarm_handler(signum, frame):
     sys.exit(CRITICAL)
     
 if __name__ == '__main__':
-    import csv
     import optparse
     import signal
 
-    parser = optparse.OptionParser(version="%prog 1.0")
+    parser = optparse.OptionParser(version="%prog 1.1")
     parser.add_option('-c', '--critical', dest='critical_days', default=10,
                      help='Number of days under which to return critical \
                      (Default: 10)', type='int')
@@ -134,6 +150,6 @@ if __name__ == '__main__':
     
     result = get_warranty(serial_number)
     
-    parse_exit(result)
-    
     signal.alarm(0)
+    
+    parse_exit(result)
