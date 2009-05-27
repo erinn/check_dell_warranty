@@ -82,7 +82,6 @@ def get_warranty(serial_number):
                 (\d+)                        #Match number of days
                 <.*                          #Match <and the rest of the line
                 """
-    #serial_number = '6MMDM51'
     
     #Build the full
     full_url = dell_url + serial_number
