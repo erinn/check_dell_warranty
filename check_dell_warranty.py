@@ -12,8 +12,9 @@
 # Revised: 2009-05-27                                                                
 # Revised by: Erinn Looney-Triggs                                                                 
 # Revision history:
-# 1.1 Fixed string conversions to do int comparisons properly. Remove import
-# csv as I am not using that yet. Add a license to the file.  
+# 2009-05-28 1.2 Added service tag to output for nagios. Fixed some typos.
+# 2009-05-27 1.1 Fixed string conversions to do int comparisons properly. 
+# Remove import csv as I am not using that yet. Add a license to the file.  
 # License:
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -83,7 +84,7 @@ def get_warranty(serial_number):
                 <.*                          #Match <and the rest of the line
                 """
     
-    #Build the full
+    #Build the full URL
     full_url = dell_url + serial_number
     
     #Try to open the page, exit on failure
@@ -97,7 +98,7 @@ def get_warranty(serial_number):
     regex = re.compile(pattern, re.X)
 
     #Gather the results returns a list of tuples
-    result = regex.findall(response.read())
+    result = (regex.findall(response.read()), serial_number)
     
     return result
 
@@ -106,19 +107,22 @@ def parse_exit(result):
         print "Dell's database appears to be down for this system."
         sys.exit(WARNING)
     
-    start_date, end_date, days_left = result[0]
+    start_date, end_date, days_left = result[0][0]
+    serial_number = result[1]
     
     if int(days_left) < options.critical_days:
-        print 'Warranty start date: %s End date: %s Days left: %s' \
-        % (start_date, end_date, days_left)
+        print 'Service Tag: %s Warranty start: %s End: %s Days left: %s' \
+        % (serial_number, start_date, end_date, days_left)
         sys.exit(CRITICAL)
+        
     elif int(days_left) < options.warning_days:
-        print 'Warranty start date: %s End date: %s Days left: %s' \
-        % (start_date, end_date, days_left)
+        print 'Service Tag: %s Warranty start: %s End: %s Days left: %s' \
+        % (serial_number, start_date, end_date, days_left)
         sys.exit(WARNING)
+        
     else:
-        print 'Warranty start date: %s End date: %s Days left: %s' \
-        % (start_date, end_date, days_left)
+        print 'Service Tag: %s Warranty start: %s End: %s Days left: %s' \
+        % (serial_number, start_date, end_date, days_left)
         sys.exit(OK)
         
 def sigalarm_handler(signum, frame):
@@ -129,7 +133,7 @@ if __name__ == '__main__':
     import optparse
     import signal
 
-    parser = optparse.OptionParser(version="%prog 1.1")
+    parser = optparse.OptionParser(version="%prog 1.2")
     parser.add_option('-c', '--critical', dest='critical_days', default=10,
                      help='Number of days under which to return critical \
                      (Default: 10)', type='int')
