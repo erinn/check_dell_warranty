@@ -10,11 +10,17 @@
 # Created: 2009-02-12                                                         
 # Author: Erinn Looney-Triggs                                                 
 # Revised: 2009-05-27                                                                
-# Revised by: Erinn Looney-Triggs                                                                 
+# Revised by: Erinn Looney-Triggs, Justin Ellison                                                                
 # Revision history:
+#
 # 2009-05-28 1.2 Added service tag to output for nagios. Fixed some typos.
+# Added command-line option for specifying a serial number.  This gets    
+# rid of the sudo dependency as well as the newer python dependency
+# allowing it to run on older RHEL distros. justin@techadvise.com
+#  
 # 2009-05-27 1.1 Fixed string conversions to do int comparisons properly. 
 # Remove import csv as I am not using that yet. Add a license to the file.  
+#
 # License:
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -32,7 +38,6 @@
 #=============================================================================
 
 import re
-import subprocess
 import sys
 import urllib2
 
@@ -45,12 +50,13 @@ OK       = 0
 
 def extract_serial_number():
     '''Extracts the serial number from the localhost using dmidecode.
-    
     This function takes no arguments but expects dmidecode to exist and
     also expects dmidecode to accept -s system-serial-number
     
     '''
+    import subprocess
     
+
     #Gather the information from dmidecode
     try:
         p = subprocess.Popen(["sudo", "dmidecode", "-s",
@@ -81,7 +87,7 @@ def get_warranty(serial_number):
                 .*>(\d{1,2}/\d{1,2}/\d{4})<  #Match date, good for 8000 years
                 .*>                          #Match anything up to >
                 (\d+)                        #Match number of days
-                <.*                          #Match <and the rest of the line
+                <.*                          #Match < and the rest of the line
                 """
     
     #Build the full URL
@@ -104,24 +110,24 @@ def get_warranty(serial_number):
 
 def parse_exit(result):
     if len(result) == 0:
-        print "Dell's database appears to be down for this system."
+        print "Dell's database appears to be down."
         sys.exit(WARNING)
     
     start_date, end_date, days_left = result[0][0]
     serial_number = result[1]
     
     if int(days_left) < options.critical_days:
-        print 'Service Tag: %s Warranty start: %s End: %s Days left: %s' \
+        print 'CRITICAL: Service Tag: %s Warranty start: %s End: %s Days left: %s' \
         % (serial_number, start_date, end_date, days_left)
         sys.exit(CRITICAL)
         
     elif int(days_left) < options.warning_days:
-        print 'Service Tag: %s Warranty start: %s End: %s Days left: %s' \
+        print 'WARNING: Service Tag: %s Warranty start: %s End: %s Days left: %s' \
         % (serial_number, start_date, end_date, days_left)
         sys.exit(WARNING)
         
     else:
-        print 'Service Tag: %s Warranty start: %s End: %s Days left: %s' \
+        print 'OK: Service Tag: %s Warranty start: %s End: %s Days left: %s' \
         % (serial_number, start_date, end_date, days_left)
         sys.exit(OK)
         
@@ -137,6 +143,9 @@ if __name__ == '__main__':
     parser.add_option('-c', '--critical', dest='critical_days', default=10,
                      help='Number of days under which to return critical \
                      (Default: 10)', type='int')
+    parser.add_option('-s', '--serial-number', dest='serial_number', 
+                      default='', help='Dell Service Tag of server \
+                      (Default: auto-detected)', type='string')
     parser.add_option('-t', '--timeout', dest='timeout', default=10,
                       help='Set the timeout for the program to run \
                       (Default: 10 seconds)', type='int')
@@ -145,11 +154,14 @@ if __name__ == '__main__':
                       (Default: 30)', type='int' )
     
     (options, args) = parser.parse_args()
-    
+        
     signal.signal(signal.SIGALRM, sigalarm_handler)
     signal.alarm(options.timeout)
     
-    serial_number = extract_serial_number()
+    if options.serial_number:
+        serial_number = options.serial_number
+    else:
+        serial_number = extract_serial_number()
     
     result = get_warranty(serial_number)
     
