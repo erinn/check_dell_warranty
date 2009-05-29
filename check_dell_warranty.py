@@ -6,12 +6,18 @@
 # issues a warning when there is less than thirty days remaining and critical when 
 # there is less than ten days remaining. These values can be adjusted using
 # the command line, see --help.                                                 
-# Version: 1.1                                                                
+# Version: 1.3                                                                
 # Created: 2009-02-12                                                         
 # Author: Erinn Looney-Triggs                                                 
-# Revised: 2009-05-27                                                                
+# Revised: 2009-05-29                                                                
 # Revised by: Erinn Looney-Triggs, Justin Ellison                                                                
 # Revision history:
+#
+# 2009-05-29 1.3 Display output for all warranties for a system. Add up the
+# number of days left to give an accurate count of the time remaining. Fix
+# basic check for Dell's database being down. Fixed regex to be non-greedy.
+# Start and end dates for warranty now takes all warranties into account.
+# Date output is now yyyy-mm-dd because that is more international.
 #
 # 2009-05-28 1.2 Added service tag to output for nagios. Fixed some typos.
 # Added command-line option for specifying a serial number.  This gets    
@@ -56,6 +62,24 @@ def extract_serial_number():
     '''
     import subprocess
     
+    def which(program):
+        import os
+        
+        def is_exe(fpath):
+            return os.path.exists(fpath) and os.access(fpath, os.X_OK)
+        
+        fpath, fname = os.path.split(program)
+        
+        if fpath:
+            if is_exe(program):
+                return program
+        else:
+            for path in os.environ["PATH"].split(os.pathsep):
+                exe_file = os.path.join(path, program)
+                if is_exe(exe_file):
+                    return exe_file
+        
+        return None
 
     #Gather the information from dmidecode
     try:
@@ -82,12 +106,12 @@ def get_warranty(serial_number):
     dell_url='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?c=us&l=en&s=gen&ServiceTag='
 
     #Regex to pull the information from Dell's site
-    pattern=r""".*>                          #Match anything up to >
+    pattern=r""">                            #Match anything up to >
                 (\d{1,2}/\d{1,2}/\d{4})<     #Match North American style date
-                .*>(\d{1,2}/\d{1,2}/\d{4})<  #Match date, good for 8000 years
-                .*>                          #Match anything up to >
+                .*?>(\d{1,2}/\d{1,2}/\d{4})< #Match date, good for 8000 years
+                .*?>                         #Match anything up to >
                 (\d+)                        #Match number of days
-                <.*                          #Match < and the rest of the line
+                <                            #Match < and the rest of the line
                 """
     
     #Build the full URL
@@ -102,26 +126,48 @@ def get_warranty(serial_number):
     
     #Build our regex
     regex = re.compile(pattern, re.X)
-
+    
     #Gather the results returns a list of tuples
     result = (regex.findall(response.read()), serial_number)
     
     return result
 
 def parse_exit(result):
-    if len(result) == 0:
+    import datetime
+    
+    days = 0
+    dates = []
+    
+    serial_number = result[1]
+    
+    if len(result[0]) == 0:
         print "Dell's database appears to be down."
         sys.exit(WARNING)
     
-    start_date, end_date, days_left = result[0][0]
-    serial_number = result[1]
+    for match in result[0]:
+        start_date, end_date, days_left = match
+        
+        #This makes this plugin limited to North American style dates but
+        #as long as the service tahe is run through the dell.com website
+        #it does not matter. (I think)
+        for date in start_date, end_date:
+            month, day, year = date.split('/')
+            dates.append(datetime.date(int(year), int(month), int(day)))
+        
+        days += int(days_left)
     
-    if int(days_left) < options.critical_days:
+    dates.sort()
+    
+    start_date = dates[0]
+    end_date = dates[-1]
+    days_left = days
+        
+    if days_left < options.critical_days:
         print 'CRITICAL: Service Tag: %s Warranty start: %s End: %s Days left: %s' \
         % (serial_number, start_date, end_date, days_left)
         sys.exit(CRITICAL)
         
-    elif int(days_left) < options.warning_days:
+    elif days_left < options.warning_days:
         print 'WARNING: Service Tag: %s Warranty start: %s End: %s Days left: %s' \
         % (serial_number, start_date, end_date, days_left)
         sys.exit(WARNING)
@@ -139,12 +185,12 @@ if __name__ == '__main__':
     import optparse
     import signal
 
-    parser = optparse.OptionParser(version="%prog 1.2")
+    parser = optparse.OptionParser(version="%prog Version: 1.3")
     parser.add_option('-c', '--critical', dest='critical_days', default=10,
                      help='Number of days under which to return critical \
                      (Default: 10)', type='int')
     parser.add_option('-s', '--serial-number', dest='serial_number', 
-                      default='', help='Dell Service Tag of server \
+                      default='', help='Dell Service Tag of system \
                       (Default: auto-detected)', type='string')
     parser.add_option('-t', '--timeout', dest='timeout', default=10,
                       help='Set the timeout for the program to run \
