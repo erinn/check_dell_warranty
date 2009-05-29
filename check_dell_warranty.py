@@ -61,25 +61,7 @@ def extract_serial_number():
     
     '''
     import subprocess
-    
-    def which(program):
-        import os
-        
-        def is_exe(fpath):
-            return os.path.exists(fpath) and os.access(fpath, os.X_OK)
-        
-        fpath, fname = os.path.split(program)
-        
-        if fpath:
-            if is_exe(program):
-                return program
-        else:
-            for path in os.environ["PATH"].split(os.pathsep):
-                exe_file = os.path.join(path, program)
-                if is_exe(exe_file):
-                    return exe_file
-        
-        return None
+
 
     #Gather the information from dmidecode
     try:
@@ -106,12 +88,12 @@ def get_warranty(serial_number):
     dell_url='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?c=us&l=en&s=gen&ServiceTag='
 
     #Regex to pull the information from Dell's site
-    pattern=r""">                            #Match anything up to >
+    pattern=r""">                            #Match  >
                 (\d{1,2}/\d{1,2}/\d{4})<     #Match North American style date
                 .*?>(\d{1,2}/\d{1,2}/\d{4})< #Match date, good for 8000 years
                 .*?>                         #Match anything up to >
                 (\d+)                        #Match number of days
-                <                            #Match < and the rest of the line
+                <                            #Match <
                 """
     
     #Build the full URL
@@ -148,7 +130,7 @@ def parse_exit(result):
         start_date, end_date, days_left = match
         
         #This makes this plugin limited to North American style dates but
-        #as long as the service tahe is run through the dell.com website
+        #as long as the service tag is run through the dell.com website
         #it does not matter. (I think)
         for date in start_date, end_date:
             month, day, year = date.split('/')
