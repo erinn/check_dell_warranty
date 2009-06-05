@@ -1,17 +1,23 @@
 #!/usr/bin/env python
 
 #=============================================================================
-# Nagios plugin to pull the Dell service tag and check it 
-# against Dell's website to see how many days remain. By default it 
+# Nagios plug-in to pull the Dell service tag and check it 
+# against Dell's web site to see how many days remain. By default it 
 # issues a warning when there is less than thirty days remaining and critical when 
 # there is less than ten days remaining. These values can be adjusted using
 # the command line, see --help.                                                 
-# Version: 1.3                                                                
+# Version: 1.4                                                                
 # Created: 2009-02-12                                                         
 # Author: Erinn Looney-Triggs                                                 
-# Revised: 2009-05-29                                                                
+# Revised: 2009-06-05                                                                
 # Revised by: Erinn Looney-Triggs, Justin Ellison                                                                
 # Revision history:
+#
+# 2009-06-05 1.4 Changed optparse to display %default in help output. Pretty
+# up the help output with <ARG> instead of variable names. Add description
+# top optparse. Will now use prefer omreport to dmidecode for systems
+# that have omreport installed and in $PATH. Note, that you do not have to be
+# root to run omreport and get the service tag.
 #
 # 2009-05-29 1.3 Display output for all warranties for a system. Add up the
 # number of days left to give an accurate count of the time remaining. Fix
@@ -43,9 +49,9 @@
 #                                       
 #=============================================================================
 
-import re
+
 import sys
-import urllib2
+
 
 #Nagios exit codes in English
 UNKNOWN  = 3
@@ -61,29 +67,73 @@ def extract_serial_number():
     
     '''
     import subprocess
-
-
-    #Gather the information from dmidecode
-    try:
-        p = subprocess.Popen(["sudo", "dmidecode", "-s",
-                               "system-serial-number"], 
-                               stdout=subprocess.PIPE, 
-                               stderr=subprocess.PIPE)
-    except OSError:
-        print 'Error:', sys.exc_value, 'exiting!'
-        sys.exit(1)
     
-    #Strip the newline off of result
-    serial_number = p.stdout.read()
+    #Lifted straight from the Internet, can't find the site anymore if
+    #I find it I will throw in appropriate thanks to the poster. 
+    def which(program):
+        import os
+        
+        def is_exe(file_path):
+            return os.path.exists(file_path) and os.access(file_path, os.X_OK)
+        
+        file_path, fname = os.path.split(program)
+        
+        if file_path:
+            if is_exe(program):
+                return program
+        else:
+            for path in os.environ["PATH"].split(os.pathsep):
+                exe_file = os.path.join(path, program)
+                if is_exe(exe_file):
+                    return exe_file
+        
+        return None
     
-    #Basic check of the serial number, can they be longer, maybe
-    if len( serial_number.strip() ) != 7:
-        print 'Invalid serial number:%s exiting!' % (serial_number)
+    omreport = which('omreport')
+    dmidecode = which('dmidecode')
+    
+    if omreport:
+        import re
+        try:
+            p = subprocess.Popen([omreport, "chassis", "info", "-fmt", "xml"],
+                                 stdout=subprocess.PIPE, 
+                                 stderr=subprocess.PIPE)
+        except OSError:
+            print 'Error:', sys.exc_value, 'exiting!'
+            sys.exit(WARNING)
+            
+        text = p.stdout.read()
+        pattern = '''<ServiceTag>(\S+)</ServiceTag>'''
+        regex = re.compile(pattern, re.X)
+        serial_number = "".join(regex.findall(text))
+        
+    elif dmidecode: 
+        #Gather the information from dmidecode
+        try:
+            p = subprocess.Popen(["sudo", "dmidecode", "-s",
+                                   "system-serial-number"], 
+                                   stdout=subprocess.PIPE, 
+                                   stderr=subprocess.PIPE)
+        except OSError:
+            print 'Error:', sys.exc_value, 'exiting!'
+            sys.exit(WARNING)
+        serial_number = p.stdout.read().strip()
+        
+    else:
+        print 'Neither omreport or dmidecode are available in $PATH, aborting!'
+        sys.exit(WARNING)
+   
+    #Basic check of the serial number, can they be longer? Maybe.
+    if len( serial_number ) != 7:
+        print 'Invalid serial number: %s exiting!' % (serial_number)
         sys.exit(WARNING)
     
-    return serial_number.strip()
+    return serial_number
 
 def get_warranty(serial_number):
+    import re
+    import urllib2
+    
     #The URL to Dell's site
     dell_url='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?c=us&l=en&s=gen&ServiceTag='
 
@@ -159,27 +209,38 @@ def parse_exit(result):
         % (serial_number, start_date, end_date, days_left)
         sys.exit(OK)
         
+    return None 
+
 def sigalarm_handler(signum, frame):
     print '%s timed out after %d seconds' % (sys.argv[0], options.timeout)
     sys.exit(CRITICAL)
-    
+
+
+
 if __name__ == '__main__':
     import optparse
     import signal
 
-    parser = optparse.OptionParser(version="%prog Version: 1.3")
+    parser = optparse.OptionParser(description='''Nagios plug-in to pull the \
+Dell service tag and check it against Dell's web site to see how many \
+days remain. By default it issues a warning when there is less than \
+thirty days remaining and critical when there is less than ten days \
+remaining. These values can be adjusted using the command line, see --help.
+    ''',
+                                   prog="check_dell_warranty",
+                                   version="%prog Version: 1.4")
     parser.add_option('-c', '--critical', dest='critical_days', default=10,
                      help='Number of days under which to return critical \
-                     (Default: 10)', type='int')
+                     (Default: %default)', type='int', metavar='<ARG>')
     parser.add_option('-s', '--serial-number', dest='serial_number', 
                       default='', help='Dell Service Tag of system \
-                      (Default: auto-detected)', type='string')
+                      (Default: auto-detected)', type='string', metavar='<ARG>')
     parser.add_option('-t', '--timeout', dest='timeout', default=10,
                       help='Set the timeout for the program to run \
-                      (Default: 10 seconds)', type='int')
+                      (Default: %default seconds)', type='int', metavar='<ARG>')
     parser.add_option('-w', '--warning', dest='warning_days', default=30,
                       help='Number of days under which to return a warning \
-                      (Default: 30)', type='int' )
+                      (Default: %default)', type='int', metavar='<ARG>' )
     
     (options, args) = parser.parse_args()
         
