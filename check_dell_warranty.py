@@ -132,15 +132,18 @@ def extract_serial_number():
         print 'Neither omreport nor dmidecode are available in $PATH, aborting!'
         sys.exit(WARNING)
     
-
-    
     return serial_numbers
 
 def get_warranty(serial_numbers):
     import re
+    import thread
+    import time
     import urllib2
     
+    thread_id = 0
     result_list = [] #List of results
+    list_write_mutex = thread.allocate_lock()
+    exit_mutexes = [0] * len(serial_numbers)
     
     #The URL to Dell's site
     dell_url='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?c=us&l=en&s=gen&ServiceTag='
@@ -153,34 +156,50 @@ def get_warranty(serial_numbers):
                 (\d+)                        #Match number of days
                 <                            #Match <
                 """
+    #Build our regex
+    regex = re.compile(pattern, re.X)
     
-    # Remove duplicates:
-    if len( serial_numbers ) > 1:
-        serial_numbers = dict.keys(dict.fromkeys(serial_numbers))
-    
-    #Basic check of the serial number, can they be longer? Maybe.
-    for number in serial_numbers:
-        if len( number ) != 7:
+    def fetch_result(thread_id, serial_number, dell_url, regex):
+                #Basic check of the serial number, can they be longer? Maybe.
+        if len( serial_number ) != 7:
             print 'Invalid serial number: %s exiting!' % (number)
             sys.exit(WARNING)
-    
-    #TODO: Make this async in the future
-    for serial_number in serial_numbers:   
+               
         #Build the full URL
         full_url = dell_url + serial_number
         
         #Try to open the page, exit on failure
         try:
             response = urllib2.urlopen(full_url)
-        except URLError:
-            print 'Unable to open URL: %s exiting!' % (full_url)
-            sys.exit(UNKNOWN)
-        
-        #Build our regex
-        regex = re.compile(pattern, re.X)
-        
-        #Gather the results returns a list of tuples
+        except URLError, e:
+            if hasattr(e, 'reason'):
+                print 'Unable to open URL: %s exiting! %s' % (full_url, e.reason)
+                sys.exit(UNKNOWN)
+            elif hasattr(e, 'code'):
+                print 'The server is unable to fulfill the request, error code: %s' \
+                % (e.code)
+                sys.exit(UNKNOWN)  
+              
+        list_write_mutex.acquire()      #Acquire our lock to write to the list
         result_list.append((regex.findall(response.read()), serial_number))
+        list_write_mutex.release()      #Release the lock
+        
+        exit_mutexes[thread_id] = 1     #Communicate that this thread is done
+        
+        thread.exit()                   #Not necessary, but pretty
+    
+    # Remove duplicates:
+    if len( serial_numbers ) > 1:
+        serial_numbers = dict.keys(dict.fromkeys(serial_numbers))
+          
+    for serial_number in serial_numbers:
+        thread.start_new(fetch_result, (thread_id, serial_number, dell_url, regex))
+        thread_id += 1
+    
+    #Check that all threads have exited
+    while 0 in exit_mutexes: 
+        time.sleep(.05)     #Give the CPU a break
+        pass
     
     return result_list
 
