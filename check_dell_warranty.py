@@ -6,12 +6,14 @@
 # issues a warning when there is less than thirty days remaining and critical 
 # when there is less than ten days remaining. These values can be adjusted 
 # using the command line, see --help.                                                 
-# Version: 1.5                                                                
+# Version: 1.6                                                                
 # Created: 2009-02-12                                                         
 # Author: Erinn Looney-Triggs                                                 
-# Revised: 2009-06-25                                                                
+# Revised: 2009-07-09                                                                
 # Revised by: Erinn Looney-Triggs, Justin Ellison                                                                
 # Revision history:
+#
+# 2009-07-09 1.6: Threads!
 #
 # 2009-06-25 1.5: Changed optparse to handle multiple serial numbers. Changed
 # the rest of the program to be able to handle multiple serial numbers. Added
@@ -231,8 +233,8 @@ def parse_exit(result_list):
             
             days += int(days_left)
         
+        #Sort the dates and grab the first and last date
         dates.sort()
-        
         start_date = dates[0]
         end_date = dates[-1]
         days_left = days
@@ -248,7 +250,7 @@ def parse_exit(result_list):
         else:
             state = 'OK'
             
-        print '| %s: Service Tag: %s Warranty start: %s End: %s Days left: %d |' \
+        print '%s: Service Tag: %s Warranty start: %s End: %s Days left: %d |' \
             % (state, serial_number, start_date, end_date, days_left),
         
     if critical:
@@ -277,7 +279,7 @@ thirty days remaining and critical when there is less than ten days \
 remaining. These values can be adjusted using the command line, see --help.
     ''',
                                    prog="check_dell_warranty",
-                                   version="%prog Version: 1.5")
+                                   version="%prog Version: 1.6")
     parser.add_option('-c', '--critical', dest='critical_days', default=10,
                      help='Number of days under which to return critical \
                      (Default: %default)', type='int', metavar='<ARG>')
