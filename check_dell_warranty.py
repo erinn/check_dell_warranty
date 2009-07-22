@@ -10,8 +10,10 @@
 # Created: 2009-02-12                                                         
 # Author: Erinn Looney-Triggs                                                 
 # Revised: 2009-07-09                                                                
-# Revised by: Erinn Looney-Triggs, Justin Ellison                                                                
+# Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas                                                           
 # Revision history:
+#
+# 2009-07-20 1.7: SNMP support, M1000e Blade support
 #
 # 2009-07-09 1.6: Threads!
 #
@@ -70,33 +72,17 @@ OK       = 0
 
 
 def extract_serial_number():
-    '''Extracts the serial number from the localhost using dmidecode.
-    This function takes no arguments but expects dmidecode to exist and
-    also expects dmidecode to accept -s system-serial-number
+    '''Extracts the serial number from the localhost using (in order of
+    precedence) omreport or dmidecode.This function takes no arguments but 
+    expects either omreport or dmidecode to exist and
+    also expects dmidecode to accept -s system-serial-number (RHEL5 or later)
     
     '''
     import subprocess
     
     #Lifted straight from the Internet, can't find the site anymore if
     #I find it I will throw in appropriate thanks to the poster. 
-    def which(program):
-        import os
-        
-        def is_exe(file_path):
-            return os.path.exists(file_path) and os.access(file_path, os.X_OK)
-        
-        file_path, fname = os.path.split(program)
-        
-        if file_path:
-            if is_exe(program):
-                return program
-        else:
-            for path in os.environ["PATH"].split(os.pathsep):
-                exe_file = os.path.join(path, program)
-                if is_exe(exe_file):
-                    return exe_file
-        
-        return None
+ 
     
     omreport = which('omreport')
     dmidecode = which('dmidecode')
@@ -136,7 +122,93 @@ def extract_serial_number():
     
     return serial_numbers
 
+def extract_serial_number_snmp( hostname, 
+                                community_string='public', 
+                                mtk_installed=False ):
+    '''Extracts the serial number from the a remote host using SNMP.
+    This function takes the following arguments: community, hostname and mtk.
+    The mtk argument will make the plug-in read the SNMP community string from  
+    /etc/mtk.conf. (/etc/mtk.conf is used by the mtk-nagios plugin. 
+    (mtk-nagios plug-in: http://www.hpccommunity.org/sysmgmt/)
+    '''
+
+    import subprocess
+    import os
+
+    serial_numbers = []
+    snmpget = which('snmpget')
+    
+    #Test that we actually have snmpget installed
+    if not snmpget:
+        print 'Unable to locate snmpget, aborting!'
+        sys.exit(UNKNOWN)
+    
+    # Get SNMP community string from /etc/mtk.conf
+    if mtk_installed:
+        mtk_conf_file='/etc/mtk.conf'
+        
+        if os.path.isfile(mtk_conf_file):
+                try:
+                    file = open(mtk_conf_file,'r')
+                except:
+                    print 'Unable to open %s, aborting!' % (mtk_conf_file)
+                    sys.exit(UNKNOWN)
+                
+                #Iterate over the file and search for the community_string   
+                for line in file:
+                        token = line.split('=')
+                        if token[0] == 'community_string':
+                                community_string = token[1]
+                file.close()
+        else:
+                print 'The %s file does not exist, aborting!' % (mtk_conf_file)
+                sys.exit(UNKNOWN)
+    
+    
+
+    #Construct the command line.
+    # TODO: Find a way to pass this in that is 'nice' so the function can
+    # stand alone
+    if options.is_blade_m1000e:
+        cmdline = ('%s -v1 -Ov -c %s %s SNMPv2-MIB::sysName.0')   
+    else:
+        cmdline = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10892.1.300.10.1.11.1')
+    
+    cmdline = cmdline % (snmpget, community_string, hostname)
+    
+    #Run the command
+    try:
+        p = subprocess.Popen(cmdline, shell=True, stdout = subprocess.PIPE,
+                             stderr = subprocess.STDOUT)
+    except OSError:
+          print 'Error:', sys.exc_value, 'exiting!'
+          sys.exit(WARNING)
+
+    #Parse through the output
+    snmp_out = p.stdout.read()
+    if len( snmp_out ) == 18: #7 Digit Service Tags
+        snmp_out = snmp_out.replace ( 'STRING: ', '')
+        snmp_out = snmp_out.replace ( '"', '')
+        serial_numbers.append(snmp_out.strip())
+    elif len( snmp_out ) == 16: #5 Digit Service Tags
+        snmp_out = snmp_out.replace ( 'STRING:', '')
+        snmp_out = snmp_out.replace ( '"', '')
+        serial_numbers.append(snmp_out.strip())
+    elif len( snmp_out ) == 35: #Blade sysName string is 35 chars and contain Service Tag.
+        snmp_out = snmp_out.replace ( 'STRING: Dell Rack System -', '')
+        serial_numbers.append(snmp_out.strip())
+    else:
+        print 'The snmpget command returned the following: %s     This does not look like a service tag, aborting!' % snmp_out
+        sys.exit(WARNING)
+
+    return serial_numbers
+
 def get_warranty(serial_numbers):
+    '''Obtains the warranty information from Dell's website. This function 
+    expects a list containing one or more serial numbers to be checked
+    against Dell's database.
+    '''
+    
     import re
     import thread
     import time
@@ -158,13 +230,16 @@ def get_warranty(serial_numbers):
                 (\d+)                        #Match number of days
                 <                            #Match <
                 """
+    
     #Build our regex
     regex = re.compile(pattern, re.X)
     
     def fetch_result(thread_id, serial_number, dell_url, regex):
-                #Basic check of the serial number, can they be longer? Maybe.
-        if len( serial_number ) != 7:
-            print 'Invalid serial number: %s exiting!' % (number)
+        
+        #Basic check of the serial number.
+        #TODO: can have serial numbers with a length of five
+        if len( serial_number ) !=7:
+            print 'Invalid serial number: %s exiting!' % (serial_number)
             sys.exit(WARNING)
                
         #Build the full URL
@@ -178,7 +253,7 @@ def get_warranty(serial_numbers):
                 print 'Unable to open URL: %s exiting! %s' % (full_url, e.reason)
                 sys.exit(UNKNOWN)
             elif hasattr(e, 'code'):
-                print 'The server is unable to fulfill the request, error code: %s' \
+                print 'The server is unable to fulfill the request, error: %s' \
                 % (e.code)
                 sys.exit(UNKNOWN)  
               
@@ -206,6 +281,10 @@ def get_warranty(serial_numbers):
     return result_list
 
 def parse_exit(result_list):
+    '''This parses the results from the getwarranty function and outputs 
+    the appropriate information.
+    '''
+    
     import datetime
     
     critical = 0
@@ -250,7 +329,7 @@ def parse_exit(result_list):
         else:
             state = 'OK'
             
-        print '%s: Service Tag: %s Warranty start: %s End: %s Days left: %d |' \
+        print '%s: Service Tag: %s Warranty start: %s End: %s Days left: %d' \
             % (state, serial_number, start_date, end_date, days_left),
         
     if critical:
@@ -263,8 +342,33 @@ def parse_exit(result_list):
     return None #Should never get here
 
 def sigalarm_handler(signum, frame):
+    '''Handler for an alarm situation.
+    '''
     print '%s timed out after %d seconds' % (sys.argv[0], options.timeout)
     sys.exit(CRITICAL)
+    
+def which(program):
+    '''This is the equivlant of the 'which' BASH builtin with a check to 
+    make sure the program that is found is executable.
+    '''
+    
+    import os
+    
+    def is_exe(file_path):
+        return os.path.exists(file_path) and os.access(file_path, os.X_OK)
+    
+    file_path, fname = os.path.split(program)
+    
+    if file_path:
+        if is_exe(program):
+            return program
+    else:
+        for path in os.environ["PATH"].split(os.pathsep):
+            exe_file = os.path.join(path, program)
+            if is_exe(exe_file):
+                return exe_file
+
+    return None
 
 
 
@@ -279,10 +383,28 @@ thirty days remaining and critical when there is less than ten days \
 remaining. These values can be adjusted using the command line, see --help.
     ''',
                                    prog="check_dell_warranty",
-                                   version="%prog Version: 1.6")
+                                   version="%prog Version: 1.7")
+    parser.add_option('-C', '--community', action='store', 
+                      dest='community_string', type='string',
+                      default='public', 
+                      help='SNMP Community String to use. (Default: %default)')
     parser.add_option('-c', '--critical', dest='critical_days', default=10,
                      help='Number of days under which to return critical \
                      (Default: %default)', type='int', metavar='<ARG>')
+    parser.add_option('-H', '--hostname', action='store',type='string', 
+                      dest='hostname', 
+                      help='Specify hostname for SNMP')
+    parser.add_option('--m1000e', action='store_true', dest='is_blade_m1000e', 
+                      default=False,
+                      help='Specify that device is Dell PowerEdge M1000e \
+                      blade chassis, SNMP Only! (Default: %default)')
+    parser.add_option('--mtk', action='store_true', dest='mtk_installed', 
+                      default=False,
+                      help='Get SNMP Community String from /etc/mtk.conf if \
+                      mtk-nagios plugin is installed. NOTE: This option \
+                      will make the mtk.conf community string take \
+                      precedence over anything entered at the \
+                      command line(Default: %default)')
     parser.add_option('-s', '--serial-number', dest='serial_number', 
                        help='Dell Service Tag of system, to enter more than \
                       one use multiple flags (Default: auto-detected)',  
@@ -299,8 +421,18 @@ remaining. These values can be adjusted using the command line, see --help.
     signal.signal(signal.SIGALRM, sigalarm_handler)
     signal.alarm(options.timeout)
     
+    
+    if options.is_blade_m1000e and not options.hostname:
+        print 'Option --m1000e requires option -H (--hostname)'
+        parser.print_help()
+        sys.exit(UNKNOWN)
+
     if options.serial_number:
         serial_numbers = options.serial_number
+    elif options.hostname or options.mtk_installed:
+        serial_numbers = extract_serial_number_snmp(options.hostname,
+                                                    options.community_string,
+                                                    options.mtk_installed)
     else:
         serial_numbers = extract_serial_number()
     
