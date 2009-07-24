@@ -117,14 +117,12 @@ def extract_serial_number():
         serial_numbers.append(p.stdout.read().strip())
         
     else:
-        print 'Neither omreport nor dmidecode are available in $PATH, aborting!'
+        print 'Neither omreport nor dmidecode are available in $PATH, exiting!'
         sys.exit(WARNING)
     
     return serial_numbers
 
-def extract_serial_number_snmp( hostname, 
-                                community_string='public', 
-                                mtk_installed=False ):
+def extract_serial_number_snmp( hostname, community_string, mtk_installed=False ):
     '''Extracts the serial number from the a remote host using SNMP.
     This function takes the following arguments: community, hostname and mtk.
     The mtk argument will make the plug-in read the SNMP community string from  
@@ -140,7 +138,7 @@ def extract_serial_number_snmp( hostname,
     
     #Test that we actually have snmpget installed
     if not snmpget:
-        print 'Unable to locate snmpget, aborting!'
+        print 'Unable to locate snmpget, exiting!'
         sys.exit(UNKNOWN)
     
     # Get SNMP community string from /etc/mtk.conf
@@ -151,19 +149,23 @@ def extract_serial_number_snmp( hostname,
                 try:
                     file = open(mtk_conf_file,'r')
                 except:
-                    print 'Unable to open %s, aborting!' % (mtk_conf_file)
+                    print 'Unable to open %s, exiting!' % (mtk_conf_file)
                     sys.exit(UNKNOWN)
                 
                 #Iterate over the file and search for the community_string   
                 for line in file:
                         token = line.split('=')
                         if token[0] == 'community_string':
-                                community_string = token[1]
+                                community_string = token[1].strip()
                 file.close()
         else:
-                print 'The %s file does not exist, aborting!' % (mtk_conf_file)
+                print 'The %s file does not exist, exiting!' % (mtk_conf_file)
                 sys.exit(UNKNOWN)
     
+    #This should be defined at this point, if not...
+    if not community_string:
+        print 'Community not defined, exiting!'
+        sys.exit(UNKNOWN)
     
 
     #Construct the command line.
@@ -198,7 +200,7 @@ def extract_serial_number_snmp( hostname,
         snmp_out = snmp_out.replace ( 'STRING: Dell Rack System -', '')
         serial_numbers.append(snmp_out.strip())
     else:
-        print 'The snmpget command returned the following: %s     This does not look like a service tag, aborting!' % snmp_out
+        print 'The snmpget command returned the following: %s     This does not look like a service tag, exiting!' % snmp_out
         sys.exit(WARNING)
 
     return serial_numbers
@@ -235,10 +237,16 @@ def get_warranty(serial_numbers):
     regex = re.compile(pattern, re.X)
     
     def fetch_result(thread_id, serial_number, dell_url, regex):
+        '''Opens a connection to Dell's website and fetches the output
+        of the page using the regex that is passed in. This function
+        expects to be used in a threaded setup as such it requires 
+        a thread id. In addition the serial number to be used needs to be
+        passed as well as the url and the regex to pull the info.
+        '''
         
         #Basic check of the serial number.
         #TODO: can have serial numbers with a length of five
-        if len( serial_number ) !=7:
+        if len( serial_number ) != 7 and len( serial_number ) != 5:
             print 'Invalid serial number: %s exiting!' % (serial_number)
             sys.exit(WARNING)
                
@@ -281,7 +289,7 @@ def get_warranty(serial_numbers):
     return result_list
 
 def parse_exit(result_list):
-    '''This parses the results from the getwarranty function and outputs 
+    '''This parses the results from the get_warranty() function and outputs 
     the appropriate information.
     '''
     
@@ -386,7 +394,7 @@ remaining. These values can be adjusted using the command line, see --help.
                                    version="%prog Version: 1.7")
     parser.add_option('-C', '--community', action='store', 
                       dest='community_string', type='string',
-                      default='public', 
+                      default=None, 
                       help='SNMP Community String to use. (Default: %default)')
     parser.add_option('-c', '--critical', dest='critical_days', default=10,
                      help='Number of days under which to return critical \
