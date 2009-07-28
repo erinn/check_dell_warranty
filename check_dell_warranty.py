@@ -6,14 +6,18 @@
 # issues a warning when there is less than thirty days remaining and critical 
 # when there is less than ten days remaining. These values can be adjusted 
 # using the command line, see --help.                                                 
-# Version: 1.6                                                                
+# Version: 1.7                                                                
 # Created: 2009-02-12                                                         
 # Author: Erinn Looney-Triggs                                                 
-# Revised: 2009-07-09                                                                
-# Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas                                                           
+# Revised: 2009-07-24                                                                
+# Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
+# TODO: different output to screen, omreport md enclosures, use pysnmp or
+# net-snmp,pylibsmbios, cap the threads, tests, 
+#
 # Revision history:
 #
-# 2009-07-20 1.7: SNMP support, M1000e Blade support
+# 2009-07-24 1.7: SNMP support, DRAC - Remote Access Controller, CMC - 
+# Chassis Management Contorller and MD/PV Disk Enclosure support.
 #
 # 2009-07-09 1.6: Threads!
 #
@@ -122,7 +126,8 @@ def extract_serial_number():
     
     return serial_numbers
 
-def extract_serial_number_snmp( hostname, community_string, mtk_installed=False ):
+def extract_serial_number_snmp( hostname, community_string='public', 
+                                mtk_installed=False ):
     '''Extracts the serial number from the a remote host using SNMP.
     This function takes the following arguments: community, hostname and mtk.
     The mtk argument will make the plug-in read the SNMP community string from  
@@ -130,17 +135,57 @@ def extract_serial_number_snmp( hostname, community_string, mtk_installed=False 
     (mtk-nagios plug-in: http://www.hpccommunity.org/sysmgmt/)
     '''
 
+    def run_snmp_command(snmp_cmd, cmdline, hostname, community_string, 
+                         encl_id=None):
+        '''Runs the command specified in snmp_cmd and collects the output, the
+        output is then sanatized to be passed back to the requestor.
+        '''
+        
+        if encl_id: 
+            cmdline = cmdline % (snmp_cmd, community_string, hostname, encl_id);
+        else: 
+            cmdline = cmdline % (snmp_cmd, community_string, hostname);
+        
+        try:
+            p = subprocess.Popen(cmdline, shell=True, stdout = subprocess.PIPE,
+                                stderr = subprocess.STDOUT)
+        except OSError:
+            print 'Error:', sys.exc_value, 'exiting!'
+            sys.exit(WARNING) 
+        
+        #This is where we sanitize the output gathered.
+        output = p.stdout.read()
+       
+        #Things we don't want in the strings:
+        replacement_strings = {'"':'', 'STRING: ':'', 'INTEGER: ':'' }
+        
+        #Strip them out:
+        for old,new in replacement_strings.iteritems():
+            output = output.replace(old,new).strip()
+        
+        #This output should be clean now.
+        return output
+    
+    
     import subprocess
     import os
-
+    
     serial_numbers = []
     snmpget = which('snmpget')
+    snmpgetnext = which('snmpgetnext')
+    snmpwalk = which('snmpwalk')
     
-    #Test that we actually have snmpget installed
+    #Test that we actually have snmpget, snmpgetnext and snmpwalk installed 
     if not snmpget:
         print 'Unable to locate snmpget, exiting!'
         sys.exit(UNKNOWN)
-    
+    if not snmpgetnext:
+        print 'Unable to locate snmpgetnext, exiting!'
+        sys.exit(UNKNOWN)
+    if not snmpwalk:
+        print 'Unable to locate snmpwalk, exiting!'
+        sys.exit(UNKNOWN)
+
     # Get SNMP community string from /etc/mtk.conf
     if mtk_installed:
         mtk_conf_file='/etc/mtk.conf'
@@ -156,52 +201,89 @@ def extract_serial_number_snmp( hostname, community_string, mtk_installed=False 
                 for line in file:
                         token = line.split('=')
                         if token[0] == 'community_string':
-                                community_string = token[1].strip()
+                               community_string = token[1].strip()
                 file.close()
         else:
                 print 'The %s file does not exist, exiting!' % (mtk_conf_file)
                 sys.exit(UNKNOWN)
+                
     
-    #This should be defined at this point, if not...
-    if not community_string:
-        print 'Community not defined, exiting!'
-        sys.exit(UNKNOWN)
-    
+    #SnmpGetNext - Get next OID in Dell tree to decide device type
+    cmdline_snmpgetnext          = ('%s -v1 -c %s %s SNMPv2-SMI::enterprises.674') 
+    #SnmpWalk - Get storage enclosure ID's
+    cmdline_get_stor_encl        = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10893.1.20.130.3.1.1') 
+    #SnmpGet - Get storage enclosure type's
+    cmdline_get_stor_encl_type   = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10893.1.20.130.3.1.16.%s') 
+    #SnmpGet - Get storage enclosure serial number
+    cmdline_get_stor_encl_serial = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10893.1.20.130.3.1.8.%s') 
+    #SnmpGet - Get server serial number (OMSA)
+    cmdline_get_server_serial    = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10892.1.300.10.1.11.1') 
+    #SnmpGet - Get server/blade chassis serial number (RAC)
+    cmdline_get_rac_serial       = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10892.2.1.1.11.0') 
+    #SnmpGet - Get PowerConnect switch serial number
+    cmdline_get_pc_serial        = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10895.3000.1.2.100.8.1.4.1') 
 
-    #Construct the command line.
-    # TODO: Find a way to pass this in that is 'nice' so the function can
-    # stand alone
-    if options.is_blade_m1000e:
-        cmdline = ('%s -v1 -Ov -c %s %s SNMPv2-MIB::sysName.0')   
-    else:
-        cmdline = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10892.1.300.10.1.11.1')
-    
-    cmdline = cmdline % (snmpget, community_string, hostname)
-    
-    #Run the command
-    try:
-        p = subprocess.Popen(cmdline, shell=True, stdout = subprocess.PIPE,
-                             stderr = subprocess.STDOUT)
-    except OSError:
-          print 'Error:', sys.exc_value, 'exiting!'
-          sys.exit(WARNING)
 
-    #Parse through the output
-    snmp_out = p.stdout.read()
-    if len( snmp_out ) == 18: #7 Digit Service Tags
-        snmp_out = snmp_out.replace ( 'STRING: ', '')
-        snmp_out = snmp_out.replace ( '"', '')
-        serial_numbers.append(snmp_out.strip())
-    elif len( snmp_out ) == 16: #5 Digit Service Tags
-        snmp_out = snmp_out.replace ( 'STRING:', '')
-        snmp_out = snmp_out.replace ( '"', '')
-        serial_numbers.append(snmp_out.strip())
-    elif len( snmp_out ) == 35: #Blade sysName string is 35 chars and contain Service Tag.
-        snmp_out = snmp_out.replace ( 'STRING: Dell Rack System -', '')
-        serial_numbers.append(snmp_out.strip())
+    
+    #Figure out device type OMSA on Server, DRAC/CMC or PowerConnect Switch
+    snmp_out = run_snmp_command(snmpgetnext, cmdline_snmpgetnext, 
+                                hostname, community_string)
+    
+    if snmp_out.find('SNMPv2-SMI::enterprises.674.10892.1.') != -1: 
+        sysType = 'omsa';          #OMSA answered.
+    elif snmp_out.find('SNMPv2-SMI::enterprises.674.10892.2.') != -1: 
+        sysType = 'RAC';           #Blade CMC or Server DRAC answered.
+    elif snmp_out.find('SNMPv2-SMI::enterprises.674.10895.')  != -1:  
+        sysType = 'powerconnect';  #PowerConnect switch answered. 
     else:
-        print 'The snmpget command returned the following: %s     This does not look like a service tag, exiting!' % snmp_out
-        sys.exit(WARNING)
+       print 'snmpgetnext Failed: %s System type or system unknown!' % ( snmp_out )
+       sys.exit(WARNING)
+
+    #System is server with OMSA, will check for External DAS enclosure and get service tag.
+    if sysType == 'omsa':
+    
+        #Is External DAS Storage Enclosure connected
+        #TODO: get rid of the split()
+        snmp_out = run_snmp_command(snmpwalk, cmdline_get_stor_encl,
+                                hostname, community_string).split('\n')
+        
+        for encl_id in snmp_out:
+            #Get enclosure type.
+            #   1: Internal
+            #   2: DellTM PowerVaultTM 200S (PowerVault 201S)
+            #   3: Dell PowerVault 210S (PowerVault 211S)
+            #   4: Dell PowerVault 220S (PowerVault 221S)
+            #   5: Dell PowerVault 660F
+            #   6: Dell PowerVault 224F
+            #   7: Dell PowerVault 660F/PowerVault 224F
+            #   8: Dell MD1000
+            #   9: Dell MD1120
+            encl_type = run_snmp_command(snmpget, cmdline_get_stor_encl_type,
+                                      hostname, community_string, 
+                                      encl_id)
+                              
+            if encl_type != '1':  #Enclosure type 1 is the servers integrated backplane.
+                #Get storage enclosure Service Tag.
+                encl_serial_number = run_snmp_command(snmpget, 
+                                                      cmdline_get_stor_encl_serial, 
+                                                      hostname, community_string, 
+                                                      encl_id)
+                serial_numbers.append(encl_serial_number)
+
+        #Get system Service Tag.
+        serial_number = run_snmp_command(snmpget, cmdline_get_server_serial, 
+                                        hostname, community_string)
+
+                # Get DRAC/CMC or PowerConnect Service Tag.
+    elif sysType == 'RAC':
+        serial_number = run_snmp_command(snmpget, cmdline_get_rac_serial, 
+                                         hostname, community_string)
+                              
+    elif sysType == 'powerconnect':
+        serial_number = run_snmp_command(snmpget, cmdline_get_pc_serial, 
+                                         hostname, community_string)
+    
+    serial_numbers.append(serial_number)
 
     return serial_numbers
 
@@ -222,7 +304,8 @@ def get_warranty(serial_numbers):
     exit_mutexes = [0] * len(serial_numbers)
     
     #The URL to Dell's site
-    dell_url='http://support.dell.com/support/topics/global.aspx/support/my_systems_info/details?c=us&l=en&s=gen&ServiceTag='
+    dell_url='http://support.dell.com/support/topics/global.aspx/support/' \
+    + 'my_systems_info/details?c=us&l=en&s=gen&ServiceTag='
 
     #Regex to pull the information from Dell's site
     pattern=r""">                            #Match  >
@@ -245,7 +328,6 @@ def get_warranty(serial_numbers):
         '''
         
         #Basic check of the serial number.
-        #TODO: can have serial numbers with a length of five
         if len( serial_number ) != 7 and len( serial_number ) != 5:
             print 'Invalid serial number: %s exiting!' % (serial_number)
             sys.exit(WARNING)
@@ -394,7 +476,7 @@ remaining. These values can be adjusted using the command line, see --help.
                                    version="%prog Version: 1.7")
     parser.add_option('-C', '--community', action='store', 
                       dest='community_string', type='string',
-                      default=None, 
+                      default='public', 
                       help='SNMP Community String to use. (Default: %default)')
     parser.add_option('-c', '--critical', dest='critical_days', default=10,
                      help='Number of days under which to return critical \
@@ -402,10 +484,6 @@ remaining. These values can be adjusted using the command line, see --help.
     parser.add_option('-H', '--hostname', action='store',type='string', 
                       dest='hostname', 
                       help='Specify hostname for SNMP')
-    parser.add_option('--m1000e', action='store_true', dest='is_blade_m1000e', 
-                      default=False,
-                      help='Specify that device is Dell PowerEdge M1000e \
-                      blade chassis, SNMP Only! (Default: %default)')
     parser.add_option('--mtk', action='store_true', dest='mtk_installed', 
                       default=False,
                       help='Get SNMP Community String from /etc/mtk.conf if \
@@ -429,12 +507,6 @@ remaining. These values can be adjusted using the command line, see --help.
     signal.signal(signal.SIGALRM, sigalarm_handler)
     signal.alarm(options.timeout)
     
-    
-    if options.is_blade_m1000e and not options.hostname:
-        print 'Option --m1000e requires option -H (--hostname)'
-        parser.print_help()
-        sys.exit(UNKNOWN)
-
     if options.serial_number:
         serial_numbers = options.serial_number
     elif options.hostname or options.mtk_installed:
