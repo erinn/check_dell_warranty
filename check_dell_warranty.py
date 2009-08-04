@@ -6,18 +6,20 @@
 # issues a warning when there is less than thirty days remaining and critical 
 # when there is less than ten days remaining. These values can be adjusted 
 # using the command line, see --help.                                                 
-# Version: 1.7                                                                
+# Version: 1.8                                                                
 # Created: 2009-02-12                                                         
 # Author: Erinn Looney-Triggs                                                 
-# Revised: 2009-07-24                                                                
+# Revised: 2009-08-04                                                                
 # Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 # TODO: different output to screen, omreport md enclosures, use pysnmp or
-# net-snmp,pylibsmbios, cap the threads, tests, 
+# net-snmp, pylibsmbios, cap the threads, tests, 
 #
 # Revision history:
 #
+# 2009-08-04 1.8: Improved the parsing of Dell's website.
+#
 # 2009-07-24 1.7: SNMP support, DRAC - Remote Access Controller, CMC - 
-# Chassis Management Contorller and MD/PV Disk Enclosure support.
+# Chassis Management Controller and MD/PV Disk Enclosure support.
 #
 # 2009-07-09 1.6: Threads!
 #
@@ -79,14 +81,10 @@ def extract_serial_number():
     '''Extracts the serial number from the localhost using (in order of
     precedence) omreport or dmidecode.This function takes no arguments but 
     expects either omreport or dmidecode to exist and
-    also expects dmidecode to accept -s system-serial-number (RHEL5 or later)
+    also expects dmidecode to accept -s system-serial-number (RHEL5 or later).
     
     '''
     import subprocess
-    
-    #Lifted straight from the Internet, can't find the site anymore if
-    #I find it I will throw in appropriate thanks to the poster. 
- 
     
     omreport = which('omreport')
     dmidecode = which('dmidecode')
@@ -96,14 +94,15 @@ def extract_serial_number():
     if omreport:
         import re
         try:
-            p = subprocess.Popen([omreport, "chassis", "info", "-fmt", "xml"],
+            process = subprocess.Popen([omreport, "chassis", "info",
+                                         "-fmt", "xml"],
                                  stdout=subprocess.PIPE, 
                                  stderr=subprocess.PIPE)
         except OSError:
             print 'Error:', sys.exc_value, 'exiting!'
             sys.exit(WARNING)
             
-        text = p.stdout.read()
+        text = process.stdout.read()
         pattern = '''<ServiceTag>(\S+)</ServiceTag>'''
         regex = re.compile(pattern, re.X)
         serial_numbers = regex.findall(text)
@@ -111,14 +110,14 @@ def extract_serial_number():
     elif dmidecode: 
         #Gather the information from dmidecode
         try:
-            p = subprocess.Popen(["sudo", "dmidecode", "-s",
+            process = subprocess.Popen(["sudo", "dmidecode", "-s",
                                    "system-serial-number"], 
                                    stdout=subprocess.PIPE, 
                                    stderr=subprocess.PIPE)
         except OSError:
             print 'Error:', sys.exc_value, 'exiting!'
             sys.exit(WARNING)
-        serial_numbers.append(p.stdout.read().strip())
+        serial_numbers.append(process.stdout.read().strip())
         
     else:
         print 'Neither omreport nor dmidecode are available in $PATH, exiting!'
@@ -142,9 +141,9 @@ def extract_serial_number_snmp( hostname, community_string='public',
         '''
         
         if encl_id: 
-            cmdline = cmdline % (snmp_cmd, community_string, hostname, encl_id);
+            cmdline = cmdline % (snmp_cmd, community_string, hostname, encl_id)
         else: 
-            cmdline = cmdline % (snmp_cmd, community_string, hostname);
+            cmdline = cmdline % (snmp_cmd, community_string, hostname)
         
         try:
             p = subprocess.Popen(cmdline, shell=True, stdout = subprocess.PIPE,
@@ -160,8 +159,8 @@ def extract_serial_number_snmp( hostname, community_string='public',
         replacement_strings = {'"':'', 'STRING: ':'', 'INTEGER: ':'' }
         
         #Strip them out:
-        for old,new in replacement_strings.iteritems():
-            output = output.replace(old,new).strip()
+        for old, new in replacement_strings.iteritems():
+            output = output.replace(old, new).strip()
         
         #This output should be clean now.
         return output
@@ -188,24 +187,24 @@ def extract_serial_number_snmp( hostname, community_string='public',
 
     # Get SNMP community string from /etc/mtk.conf
     if mtk_installed:
-        mtk_conf_file='/etc/mtk.conf'
+        mtk_conf_file = '/etc/mtk.conf'
         
         if os.path.isfile(mtk_conf_file):
-                try:
-                    file = open(mtk_conf_file,'r')
-                except:
-                    print 'Unable to open %s, exiting!' % (mtk_conf_file)
-                    sys.exit(UNKNOWN)
+            try:
+                conf_file = open(mtk_conf_file, 'r')
+            except:
+                print 'Unable to open %s, exiting!' % (mtk_conf_file)
+                sys.exit(UNKNOWN)
                 
                 #Iterate over the file and search for the community_string   
-                for line in file:
-                        token = line.split('=')
-                        if token[0] == 'community_string':
-                               community_string = token[1].strip()
-                file.close()
+            for line in conf_file:
+                token = line.split('=')
+                if token[0] == 'community_string':
+                    community_string = token[1].strip()
+                conf_file.close()
         else:
-                print 'The %s file does not exist, exiting!' % (mtk_conf_file)
-                sys.exit(UNKNOWN)
+            print 'The %s file does not exist, exiting!' % (mtk_conf_file)
+            sys.exit(UNKNOWN)
                 
     
     #SnmpGetNext - Get next OID in Dell tree to decide device type
@@ -230,16 +229,17 @@ def extract_serial_number_snmp( hostname, community_string='public',
                                 hostname, community_string)
     
     if snmp_out.find('SNMPv2-SMI::enterprises.674.10892.1.') != -1: 
-        sysType = 'omsa';          #OMSA answered.
+        sysType = 'omsa'          #OMSA answered.
     elif snmp_out.find('SNMPv2-SMI::enterprises.674.10892.2.') != -1: 
-        sysType = 'RAC';           #Blade CMC or Server DRAC answered.
+        sysType = 'RAC'           #Blade CMC or Server DRAC answered.
     elif snmp_out.find('SNMPv2-SMI::enterprises.674.10895.')  != -1:  
-        sysType = 'powerconnect';  #PowerConnect switch answered. 
+        sysType = 'powerconnect'  #PowerConnect switch answered. 
     else:
-       print 'snmpgetnext Failed: %s System type or system unknown!' % ( snmp_out )
-       sys.exit(WARNING)
+        print 'snmpgetnext Failed: %s System type or system unknown!' % ( snmp_out )
+        sys.exit(WARNING)
 
-    #System is server with OMSA, will check for External DAS enclosure and get service tag.
+    #System is server with OMSA, will check for External DAS enclosure 
+    #and get service tag.
     if sysType == 'omsa':
     
         #Is External DAS Storage Enclosure connected
@@ -262,7 +262,7 @@ def extract_serial_number_snmp( hostname, community_string='public',
                                       hostname, community_string, 
                                       encl_id)
                               
-            if encl_type != '1':  #Enclosure type 1 is the servers integrated backplane.
+            if encl_type != '1':  #Enclosure type 1 is integrated backplane.
                 #Get storage enclosure Service Tag.
                 encl_serial_number = run_snmp_command(snmpget, 
                                                       cmdline_get_stor_encl_serial, 
@@ -304,11 +304,11 @@ def get_warranty(serial_numbers):
     exit_mutexes = [0] * len(serial_numbers)
     
     #The URL to Dell's site
-    dell_url='http://support.dell.com/support/topics/global.aspx/support/' \
+    dell_url = 'http://support.dell.com/support/topics/global.aspx/support/' \
     + 'my_systems_info/details?c=us&l=en&s=gen&ServiceTag='
 
     #Regex to pull the information from Dell's site
-    pattern=r""">                            #Match  >
+    pattern = r""">                          #Match  >
                 (\d{1,2}/\d{1,2}/\d{4})<     #Match North American style date
                 .*?>(\d{1,2}/\d{1,2}/\d{4})< #Match date, good for 8000 years
                 .*?>                         #Match anything up to >
@@ -338,13 +338,14 @@ def get_warranty(serial_numbers):
         #Try to open the page, exit on failure
         try:
             response = urllib2.urlopen(full_url)
-        except URLError, e:
-            if hasattr(e, 'reason'):
-                print 'Unable to open URL: %s exiting! %s' % (full_url, e.reason)
+        except URLError, error:
+            if hasattr(error, 'reason'):
+                print 'Unable to open URL: %s exiting! %s' \
+                % (full_url, error.reason)
                 sys.exit(UNKNOWN)
-            elif hasattr(e, 'code'):
+            elif hasattr(error, 'code'):
                 print 'The server is unable to fulfill the request, error: %s' \
-                % (e.code)
+                % (error.code)
                 sys.exit(UNKNOWN)  
               
         list_write_mutex.acquire()      #Acquire our lock to write to the list
@@ -360,7 +361,8 @@ def get_warranty(serial_numbers):
         serial_numbers = dict.keys(dict.fromkeys(serial_numbers))
           
     for serial_number in serial_numbers:
-        thread.start_new(fetch_result, (thread_id, serial_number, dell_url, regex))
+        thread.start_new(fetch_result, (thread_id, serial_number, 
+                                        dell_url, regex))
         thread_id += 1
     
     #Check that all threads have exited
@@ -409,12 +411,12 @@ def parse_exit(result_list):
         days_left = days
         
         if days_left < options.critical_days:
-            state ='CRITICAL'
-            critical+= 1
+            state = 'CRITICAL'
+            critical += 1
             
         elif days_left < options.warning_days:
             state = 'WARNING'
-            warning+= 1
+            warning += 1
             
         else:
             state = 'OK'
@@ -445,6 +447,8 @@ def which(program):
     import os
     
     def is_exe(file_path):
+        '''Tests that a file exists and is executable.
+        '''
         return os.path.exists(file_path) and os.access(file_path, os.X_OK)
     
     file_path, fname = os.path.split(program)
@@ -473,7 +477,7 @@ thirty days remaining and critical when there is less than ten days \
 remaining. These values can be adjusted using the command line, see --help.
     ''',
                                    prog="check_dell_warranty",
-                                   version="%prog Version: 1.7")
+                                   version="%prog Version: 1.8")
     parser.add_option('-C', '--community', action='store', 
                       dest='community_string', type='string',
                       default='public', 
@@ -481,7 +485,7 @@ remaining. These values can be adjusted using the command line, see --help.
     parser.add_option('-c', '--critical', dest='critical_days', default=10,
                      help='Number of days under which to return critical \
                      (Default: %default)', type='int', metavar='<ARG>')
-    parser.add_option('-H', '--hostname', action='store',type='string', 
+    parser.add_option('-H', '--hostname', action='store', type='string', 
                       dest='hostname', 
                       help='Specify hostname for SNMP')
     parser.add_option('--mtk', action='store_true', dest='mtk_installed', 
