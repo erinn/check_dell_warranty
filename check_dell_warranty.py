@@ -11,12 +11,17 @@
 # Author: Erinn Looney-Triggs                                                 
 # Revised: 2009-08-04                                                                
 # Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
+#
 # TODO: different output to screen, omreport md enclosures, use pysnmp or
-# net-snmp, pylibsmbios, cap the threads, tests, 
+# net-snmp, pylibsmbios, cap the threads, tests, more I suppose
 #
 # Revision history:
 #
-# 2009-08-04 1.8: Improved the parsing of Dell's website.
+# 2009-08-04 1.8: Improved the parsing of Dell's website, output is now much
+# more complete (read larger) and includes all warranties. Thresholds are
+# measured against the warranty with the greatest number of days remaining.
+# This fixes the bug with doubled or even tripled warranty days being 
+# reported.
 #
 # 2009-07-24 1.7: SNMP support, DRAC - Remote Access Controller, CMC - 
 # Chassis Management Controller and MD/PV Disk Enclosure support.
@@ -306,17 +311,14 @@ def get_warranty(serial_numbers):
     #The URL to Dell's site
     dell_url = 'http://support.dell.com/support/topics/global.aspx/support/' \
     + 'my_systems_info/details?c=us&l=en&s=gen&ServiceTag='
-
-    #Regex to pull the information from Dell's site
-    pattern = r""">                          #Match  >
-                (\d{1,2}/\d{1,2}/\d{4})<     #Match North American style date
-                .*?>(\d{1,2}/\d{1,2}/\d{4})< #Match date, good for 8000 years
-                .*?>                         #Match anything up to >
-                (\d+)                        #Match number of days
-                <                            #Match <
-                """
     
-    #Build our regex
+    pattern = r"""(                         #Capture
+                  <table                    #Beginning of table
+                  .*?                       #Non-greedy match
+                  class="contract_table"    #Get the right table
+                  .*?                       #Non-greedy match
+                  </table>)"""              #Closing tag
+                              
     regex = re.compile(pattern, re.X)
     
     def fetch_result(thread_id, serial_number, dell_url, regex):
@@ -378,51 +380,95 @@ def parse_exit(result_list):
     '''
     
     import datetime
+    import re
     
     critical = 0
-    warning = 0
+    warning  = 0
+    
+    def i8n_date(date):
+        ''' Simple function that takes a North American style date string
+        seperated by '/'s and converts it to ISO standard date format
+        of yyy-mm-dd, returns this value as a string.
+        '''
+        
+        month, day, year = date.split('/')
+        return datetime.date(int(year), int(month), int(day))
+        
+    def parse_table(table):
+        '''Takes an HTML string of a table and returns a list of lists of
+        the contents of the table.
+        '''
+        
+        results = []
+        
+        row_pattern     = """<tr>(.*?)</tr>"""
+        table_pattern   = """<td.*?>(.*?)</td>"""
+        row_regex       = re.compile(row_pattern)
+        table_regex     = re.compile(table_pattern)
+        
+        #Pull the rows out
+        rows = row_regex.findall(table)
+        for row in rows:
+            row_list = []
+            tables = table_regex.findall(row)
+            
+            #Clean the tables
+            for table in tables:
+                row_list.append(re.sub(r'<[^>]*?>', '', table))
+            
+            results.append(row_list)
+            
+        #Remove the header line
+        results.pop(0)
+        
+        return results
     
     for result in result_list:
-        days = 0
-        dates = []
+        days = []
         
         serial_number = result[1]
+
+        #We start to build our output line
+        full_line = r'%s: Service Tag: %s' 
         
         if len(result[0]) == 0:
             print "Dell's database appears to be down."
             sys.exit(WARNING)
         
         for match in result[0]:
-            start_date, end_date, days_left = match
             
-            #This makes this plugin limited to North American style dates but
-            #as long as the service tag is run through the dell.com website
-            #it does not matter. (I think)
-            for date in start_date, end_date:
-                month, day, year = date.split('/')
-                dates.append(datetime.date(int(year), int(month), int(day)))
+            #Because there can be multiple warranties for one system we get
+            #them all
+            warranties = parse_table(match)
             
-            days += int(days_left)
+            for entry in warranties:
+                description, provider, start_date, end_date, days_left = entry[0:5]
+                
+                #Convert the dates to international standard
+                start_date = str(i8n_date(start_date))
+                end_date   = str(i8n_date(end_date))
+                
+                full_line = full_line + ' Warranty: ' + description \
+                + ', Provider: ' + provider + ', Start: ' + start_date \
+                + ', End: ' + end_date + ', Days left: ' + days_left
+                
+                days.append(int(days_left))
         
-        #Sort the dates and grab the first and last date
-        dates.sort()
-        start_date = dates[0]
-        end_date = dates[-1]
-        days_left = days
+        #Put the days remaining in ascending order
+        days.sort()
         
-        if days_left < options.critical_days:
+        if days[-1] < options.critical_days:
             state = 'CRITICAL'
             critical += 1
             
-        elif days_left < options.warning_days:
+        elif days[-1] < options.warning_days:
             state = 'WARNING'
             warning += 1
             
         else:
             state = 'OK'
             
-        print '%s: Service Tag: %s Warranty start: %s End: %s Days left: %d' \
-            % (state, serial_number, start_date, end_date, days_left),
+        print full_line % ( state, serial_number )
         
     if critical:
         sys.exit(CRITICAL)
@@ -436,6 +482,7 @@ def parse_exit(result_list):
 def sigalarm_handler(signum, frame):
     '''Handler for an alarm situation.
     '''
+    
     print '%s timed out after %d seconds' % (sys.argv[0], options.timeout)
     sys.exit(CRITICAL)
     
@@ -479,9 +526,9 @@ remaining. These values can be adjusted using the command line, see --help.
                                    prog="check_dell_warranty",
                                    version="%prog Version: 1.8")
     parser.add_option('-C', '--community', action='store', 
-                      dest='community_string', type='string',
-                      default='public', 
-                      help='SNMP Community String to use. (Default: %default)')
+                      dest='community_string', type='string',default='public', 
+                      help='SNMP Community String to use. \
+                      (Default: %default)')
     parser.add_option('-c', '--critical', dest='critical_days', default=10,
                      help='Number of days under which to return critical \
                      (Default: %default)', type='int', metavar='<ARG>')
@@ -501,7 +548,8 @@ remaining. These values can be adjusted using the command line, see --help.
                       action='append', metavar='<ARG>')
     parser.add_option('-t', '--timeout', dest='timeout', default=10,
                       help='Set the timeout for the program to run \
-                      (Default: %default seconds)', type='int', metavar='<ARG>')
+                      (Default: %default seconds)', type='int', 
+                      metavar='<ARG>')
     parser.add_option('-w', '--warning', dest='warning_days', default=30,
                       help='Number of days under which to return a warning \
                       (Default: %default)', type='int', metavar='<ARG>' )
