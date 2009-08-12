@@ -6,16 +6,20 @@
 # issues a warning when there is less than thirty days remaining and critical 
 # when there is less than ten days remaining. These values can be adjusted 
 # using the command line, see --help.                                                 
-# Version: 1.8                                                                
+# Version: 1.9                                                                
 # Created: 2009-02-12                                                         
 # Author: Erinn Looney-Triggs                                                 
-# Revised: 2009-08-04                                                                
+# Revised: 2009-08-12                                                                
 # Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 #
 # TODO: different output to screen, omreport md enclosures, use pysnmp or
-# net-snmp, pylibsmbios, cap the threads, tests, more I suppose
+# net-snmp, cap the threads, tests, more I suppose
 #
 # Revision history:
+#
+# 2009-08-07 1.9: Pretty output to screen versus nagios, add pysmbios
+# as a way to get the serial number. Move away from old string formatting
+# to new string formatting.
 #
 # 2009-08-04 1.8: Improved the parsing of Dell's website, output is now much
 # more complete (read larger) and includes all warranties. Thresholds are
@@ -84,20 +88,31 @@ OK       = 0
 
 def extract_serial_number():
     '''Extracts the serial number from the localhost using (in order of
-    precedence) omreport or dmidecode.This function takes no arguments but 
-    expects either omreport or dmidecode to exist and
-    also expects dmidecode to accept -s system-serial-number (RHEL5 or later).
+    precedence) omreport, libsmbios, or dmidecode.This function takes 
+    no arguments but expects omreport, libsmbios or dmidecode to exist 
+    and also expects dmidecode to accept -s system-serial-number 
+    (RHEL5 or later).
     
     '''
+    import os
     import subprocess
     
-    omreport = which('omreport')
     dmidecode = which('dmidecode')
-    
+    libsmbios = False
+    omreport  = which('omreport')
     serial_numbers = []
     
+    #Test for the libsmbios module
+    try:
+        import libsmbios_c
+    except ImportError:
+        pass                #Module does not exist, move on
+    finally:
+        libsmbios = True
+
     if omreport:
         import re
+        
         try:
             process = subprocess.Popen([omreport, "chassis", "info",
                                          "-fmt", "xml"],
@@ -112,10 +127,26 @@ def extract_serial_number():
         regex = re.compile(pattern, re.X)
         serial_numbers = regex.findall(text)
         
+    elif libsmbios:
+        #You have to be root to extract the serial number via this method
+        if os.geteuid() != 0: 
+            print ('{0} must be run as root in order to access '
+            'libsmbios, exiting!').format(sys.argv[0])
+            sys.exit(WARNING)
+        
+        serial_numbers.append(libsmbios_c.system_info.get_service_tag())
+           
     elif dmidecode: 
         #Gather the information from dmidecode
+        
+        sudo = which('sudo')
+        
+        if not sudo:
+            print 'Sudo is not available, exiting!'
+            sys.exit(WARNING)
+        
         try:
-            process = subprocess.Popen(["sudo", "dmidecode", "-s",
+            process = subprocess.Popen([sudo, dmidecode, "-s",
                                    "system-serial-number"], 
                                    stdout=subprocess.PIPE, 
                                    stderr=subprocess.PIPE)
@@ -125,7 +156,8 @@ def extract_serial_number():
         serial_numbers.append(process.stdout.read().strip())
         
     else:
-        print 'Neither omreport nor dmidecode are available in $PATH, exiting!'
+        print ('Omreport, libsmbios and dmidecode are not available in '
+        '$PATH, exiting!')
         sys.exit(WARNING)
     
     return serial_numbers
@@ -133,26 +165,30 @@ def extract_serial_number():
 def extract_serial_number_snmp( hostname, community_string='public', 
                                 mtk_installed=False ):
     '''Extracts the serial number from the a remote host using SNMP.
-    This function takes the following arguments: community, hostname and mtk.
-    The mtk argument will make the plug-in read the SNMP community string from  
-    /etc/mtk.conf. (/etc/mtk.conf is used by the mtk-nagios plugin. 
+    This function takes the following arguments: community, hostname 
+    and mtk. The mtk argument will make the plug-in read the SNMP 
+    community string from /etc/mtk.conf. (/etc/mtk.conf is used by 
+    the mtk-nagios plugin. 
     (mtk-nagios plug-in: http://www.hpccommunity.org/sysmgmt/)
     '''
 
     def run_snmp_command(snmp_cmd, cmdline, hostname, community_string, 
                          encl_id=None):
-        '''Runs the command specified in snmp_cmd and collects the output, the
-        output is then sanatized to be passed back to the requestor.
+        '''Runs the command specified in snmp_cmd and collects the 
+        output, the output is then sanitized to be passed back to 
+        the requester.
         '''
         
         if encl_id: 
-            cmdline = cmdline % (snmp_cmd, community_string, hostname, encl_id)
+            cmdline = cmdline.format(snmp_cmd, 
+                                     community_string, hostname, encl_id)
         else: 
-            cmdline = cmdline % (snmp_cmd, community_string, hostname)
+            cmdline = cmdline.format(snmp_cmd, community_string, hostname)
         
         try:
-            p = subprocess.Popen(cmdline, shell=True, stdout = subprocess.PIPE,
-                                stderr = subprocess.STDOUT)
+            p = subprocess.Popen(cmdline, shell=True, 
+                                 stdout = subprocess.PIPE, 
+                                 stderr = subprocess.STDOUT)
         except OSError:
             print 'Error:', sys.exc_value, 'exiting!'
             sys.exit(WARNING) 
@@ -198,7 +234,7 @@ def extract_serial_number_snmp( hostname, community_string='public',
             try:
                 conf_file = open(mtk_conf_file, 'r')
             except:
-                print 'Unable to open %s, exiting!' % (mtk_conf_file)
+                print 'Unable to open {0}, exiting!'.format(mtk_conf_file)
                 sys.exit(UNKNOWN)
                 
                 #Iterate over the file and search for the community_string   
@@ -208,24 +244,38 @@ def extract_serial_number_snmp( hostname, community_string='public',
                     community_string = token[1].strip()
                 conf_file.close()
         else:
-            print 'The %s file does not exist, exiting!' % (mtk_conf_file)
+            print ('The {0} file does not exist, '
+                   'exiting!').format(mtk_conf_file)
             sys.exit(UNKNOWN)
                 
     
     #SnmpGetNext - Get next OID in Dell tree to decide device type
-    cmdline_snmpgetnext          = ('%s -v1 -c %s %s SNMPv2-SMI::enterprises.674') 
+    cmdline_snmpgetnext          = ('{0} -v1 -c {1} {2} '
+                                    'SNMPv2-SMI::enterprises.674') 
     #SnmpWalk - Get storage enclosure ID's
-    cmdline_get_stor_encl        = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10893.1.20.130.3.1.1') 
+    cmdline_get_stor_encl        = ('{0} -v1 -Ov -c {1} {2} '
+                                    'SNMPv2-SMI::enterprises.674.'
+                                    '10893.1.20.130.3.1.1') 
     #SnmpGet - Get storage enclosure type's
-    cmdline_get_stor_encl_type   = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10893.1.20.130.3.1.16.%s') 
+    cmdline_get_stor_encl_type   = ('{0} -v1 -Ov -c {1} {2} '
+                                    'SNMPv2-SMI::enterprises.674.'
+                                    '10893.1.20.130.3.1.16.{3}') 
     #SnmpGet - Get storage enclosure serial number
-    cmdline_get_stor_encl_serial = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10893.1.20.130.3.1.8.%s') 
+    cmdline_get_stor_encl_serial = ('{0} -v1 -Ov -c {1} {2} '
+                                    'SNMPv2-SMI::enterprises.674.'
+                                    '10893.1.20.130.3.1.8.{3}') 
     #SnmpGet - Get server serial number (OMSA)
-    cmdline_get_server_serial    = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10892.1.300.10.1.11.1') 
+    cmdline_get_server_serial    = ('{0} -v1 -Ov -c {1} {2} '
+                                    'SNMPv2-SMI::enterprises.674.'
+                                    '10892.1.300.10.1.11.1') 
     #SnmpGet - Get server/blade chassis serial number (RAC)
-    cmdline_get_rac_serial       = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10892.2.1.1.11.0') 
+    cmdline_get_rac_serial       = ('{0} -v1 -Ov -c {1} {2} '
+                                    'SNMPv2-SMI::enterprises.674.'
+                                    '10892.2.1.1.11.0') 
     #SnmpGet - Get PowerConnect switch serial number
-    cmdline_get_pc_serial        = ('%s -v1 -Ov -c %s %s SNMPv2-SMI::enterprises.674.10895.3000.1.2.100.8.1.4.1') 
+    cmdline_get_pc_serial        = ('{0} -v1 -Ov -c {1} {2} '
+                                    'SNMPv2-SMI::enterprises.674.'
+                                    '10895.3000.1.2.100.8.1.4.1') 
 
 
     
@@ -240,7 +290,8 @@ def extract_serial_number_snmp( hostname, community_string='public',
     elif snmp_out.find('SNMPv2-SMI::enterprises.674.10895.')  != -1:  
         sysType = 'powerconnect'  #PowerConnect switch answered. 
     else:
-        print 'snmpgetnext Failed: %s System type or system unknown!' % ( snmp_out )
+        print ('snmpgetnext Failed: {0} System '
+               'type or system unknown!').format(snmp_out)
         sys.exit(WARNING)
 
     #System is server with OMSA, will check for External DAS enclosure 
@@ -271,7 +322,8 @@ def extract_serial_number_snmp( hostname, community_string='public',
                 #Get storage enclosure Service Tag.
                 encl_serial_number = run_snmp_command(snmpget, 
                                                       cmdline_get_stor_encl_serial, 
-                                                      hostname, community_string, 
+                                                      hostname, 
+                                                      community_string, 
                                                       encl_id)
                 serial_numbers.append(encl_serial_number)
 
@@ -279,7 +331,7 @@ def extract_serial_number_snmp( hostname, community_string='public',
         serial_number = run_snmp_command(snmpget, cmdline_get_server_serial, 
                                         hostname, community_string)
 
-                # Get DRAC/CMC or PowerConnect Service Tag.
+    # Get DRAC/CMC or PowerConnect Service Tag.
     elif sysType == 'RAC':
         serial_number = run_snmp_command(snmpget, cmdline_get_rac_serial, 
                                          hostname, community_string)
@@ -331,7 +383,7 @@ def get_warranty(serial_numbers):
         
         #Basic check of the serial number.
         if len( serial_number ) != 7 and len( serial_number ) != 5:
-            print 'Invalid serial number: %s exiting!' % (serial_number)
+            print 'Invalid serial number: {0} exiting!'.format(serial_number)
             sys.exit(WARNING)
                
         #Build the full URL
@@ -342,12 +394,12 @@ def get_warranty(serial_numbers):
             response = urllib2.urlopen(full_url)
         except URLError, error:
             if hasattr(error, 'reason'):
-                print 'Unable to open URL: %s exiting! %s' \
-                % (full_url, error.reason)
+                print ('Unable to open URL: '
+                       '{0} exiting! {1}').format(full_url, error.reason)
                 sys.exit(UNKNOWN)
             elif hasattr(error, 'code'):
-                print 'The server is unable to fulfill the request, error: %s' \
-                % (error.code)
+                print ('The server is unable to fulfill '
+                'the request, error: {0}').format(error.code)
                 sys.exit(UNKNOWN)  
               
         list_write_mutex.acquire()      #Acquire our lock to write to the list
@@ -388,7 +440,7 @@ def parse_exit(result_list):
     def i8n_date(date):
         ''' Simple function that takes a North American style date string
         seperated by '/'s and converts it to ISO standard date format
-        of yyy-mm-dd, returns this value as a string.
+        of yyy-mm-dd and returns it.
         '''
         
         month, day, year = date.split('/')
@@ -417,11 +469,9 @@ def parse_exit(result_list):
                 row_list.append(re.sub(r'<[^>]*?>', '', table))
             
             results.append(row_list)
-            
-        #Remove the header line
-        results.pop(0)
         
         return results
+    
     
     for result in result_list:
         days = []
@@ -429,7 +479,7 @@ def parse_exit(result_list):
         serial_number = result[1]
 
         #We start to build our output line
-        full_line = r'%s: Service Tag: %s' 
+        full_line = r'{0}: Service Tag: {1}' 
         
         if len(result[0]) == 0:
             print "Dell's database appears to be down."
@@ -440,9 +490,13 @@ def parse_exit(result_list):
             #Because there can be multiple warranties for one system we get
             #them all
             warranties = parse_table(match)
+           
+            #Remove the header lines. 
+            warranties.pop(0)
             
             for entry in warranties:
-                description, provider, start_date, end_date, days_left = entry[0:5]
+                (description, provider, start_date, end_date, 
+                 days_left) = entry[0:5]
                 
                 #Convert the dates to international standard
                 start_date = str(i8n_date(start_date))
@@ -468,7 +522,7 @@ def parse_exit(result_list):
         else:
             state = 'OK'
             
-        print full_line % ( state, serial_number )
+        print full_line.format(state, serial_number ),
         
     if critical:
         sys.exit(CRITICAL)
@@ -480,10 +534,9 @@ def parse_exit(result_list):
     return None #Should never get here
 
 def sigalarm_handler(signum, frame):
-    '''Handler for an alarm situation.
-    '''
+    '''Handler for an alarm situation.'''
     
-    print '%s timed out after %d seconds' % (sys.argv[0], options.timeout)
+    print '{0} timed out after {1} seconds'.format(sys.argv[0], options.timeout)
     sys.exit(CRITICAL)
     
 def which(program):
@@ -517,42 +570,42 @@ if __name__ == '__main__':
     import optparse
     import signal
 
-    parser = optparse.OptionParser(description='''Nagios plug-in to pull the \
-Dell service tag and check it against Dell's web site to see how many \
-days remain. By default it issues a warning when there is less than \
-thirty days remaining and critical when there is less than ten days \
+    parser = optparse.OptionParser(description='''Nagios plug-in to pull the 
+Dell service tag and check it against Dell's web site to see how many 
+days remain. By default it issues a warning when there is less than 
+thirty days remaining and critical when there is less than ten days 
 remaining. These values can be adjusted using the command line, see --help.
-    ''',
+''',
                                    prog="check_dell_warranty",
-                                   version="%prog Version: 1.8")
+                                   version="%prog Version: 1.9")
     parser.add_option('-C', '--community', action='store', 
                       dest='community_string', type='string',default='public', 
-                      help='SNMP Community String to use. \
-                      (Default: %default)')
+                      help=('SNMP Community String to use. '
+                      '(Default: %default)'))
     parser.add_option('-c', '--critical', dest='critical_days', default=10,
-                     help='Number of days under which to return critical \
-                     (Default: %default)', type='int', metavar='<ARG>')
+                     help=('Number of days under which to return critical '
+                     '(Default: %default)'), type='int', metavar='<ARG>')
     parser.add_option('-H', '--hostname', action='store', type='string', 
                       dest='hostname', 
                       help='Specify hostname for SNMP')
     parser.add_option('--mtk', action='store_true', dest='mtk_installed', 
                       default=False,
-                      help='Get SNMP Community String from /etc/mtk.conf if \
-                      mtk-nagios plugin is installed. NOTE: This option \
-                      will make the mtk.conf community string take \
-                      precedence over anything entered at the \
-                      command line(Default: %default)')
+                      help=('Get SNMP Community String from /etc/mtk.conf if '
+                      'mtk-nagios plugin is installed. NOTE: This option '
+                      'will make the mtk.conf community string take '
+                      'precedence over anything entered at the '
+                      'command line (Default: %default)'))
     parser.add_option('-s', '--serial-number', dest='serial_number', 
-                       help='Dell Service Tag of system, to enter more than \
-                      one use multiple flags (Default: auto-detected)',  
+                       help=('Dell Service Tag of system, to enter more than '
+                      'one use multiple flags (Default: auto-detected)'),  
                       action='append', metavar='<ARG>')
     parser.add_option('-t', '--timeout', dest='timeout', default=10,
-                      help='Set the timeout for the program to run \
-                      (Default: %default seconds)', type='int', 
+                      help=('Set the timeout for the program to run '
+                      '(Default: %default seconds)'), type='int', 
                       metavar='<ARG>')
     parser.add_option('-w', '--warning', dest='warning_days', default=30,
-                      help='Number of days under which to return a warning \
-                      (Default: %default)', type='int', metavar='<ARG>' )
+                      help=('Number of days under which to return a warning '
+                      '(Default: %default)'), type='int', metavar='<ARG>' )
     
     (options, args) = parser.parse_args()
         
