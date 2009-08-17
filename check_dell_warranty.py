@@ -17,9 +17,8 @@
 #
 # Revision history:
 #
-# 2009-08-07 1.9: Pretty output to screen versus nagios, add pysmbios
-# as a way to get the serial number. Move away from old string formatting
-# to new string formatting.
+# 2009-08-07 1.9: Add smbios as a way to get the serial number. 
+# Move away from old string formatting to new string formatting.
 #
 # 2009-08-04 1.8: Improved the parsing of Dell's website, output is now much
 # more complete (read larger) and includes all warranties. Thresholds are
@@ -88,7 +87,7 @@ OK       = 0
 
 def extract_serial_number():
     '''Extracts the serial number from the localhost using (in order of
-    precedence) omreport, libsmbios, or dmidecode.This function takes 
+    precedence) omreport, libsmbios, or dmidecode. This function takes 
     no arguments but expects omreport, libsmbios or dmidecode to exist 
     and also expects dmidecode to accept -s system-serial-number 
     (RHEL5 or later).
@@ -107,9 +106,9 @@ def extract_serial_number():
         import libsmbios_c
     except ImportError:
         pass                #Module does not exist, move on
-    finally:
+    else:
         libsmbios = True
-
+    
     if omreport:
         import re
         
