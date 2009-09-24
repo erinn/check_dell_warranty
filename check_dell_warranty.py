@@ -1,22 +1,27 @@
 #!/usr/bin/env python
+'''
+Nagios plug-in to pull the Dell service tag and check it 
+against Dell's web site to see how many days remain. By default it 
+issues a warning when there is less than thirty days remaining and critical 
+when there is less than ten days remaining. These values can be adjusted 
+using the command line, see --help.
+
+                                                 
+Version: 2.0                                                                
+Created: 2009-02-12                                                         
+Author: Erinn Looney-Triggs                                                 
+Revised: 2009-08-12                                                                
+Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
+'''
 
 #=============================================================================
-# Nagios plug-in to pull the Dell service tag and check it 
-# against Dell's web site to see how many days remain. By default it 
-# issues a warning when there is less than thirty days remaining and critical 
-# when there is less than ten days remaining. These values can be adjusted 
-# using the command line, see --help.                                                 
-# Version: 1.9                                                                
-# Created: 2009-02-12                                                         
-# Author: Erinn Looney-Triggs                                                 
-# Revised: 2009-08-12                                                                
-# Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
-#
-# TODO: different output to screen, omreport md enclosures, use pysnmp or
+# TODO: omreport md enclosures, use pysnmp or
 # net-snmp, cap the threads, tests, more I suppose
 #
 # Revision history:
 #
+# 2.0: Fix formatting issues, change some variable names, fix a file 
+# open exception issue, 
 # 2009-08-07 1.9: Add smbios as a way to get the serial number. 
 # Move away from old string formatting to new string formatting.
 #
@@ -77,6 +82,7 @@
 
 import sys
 
+__version__ = '2.0'
 
 #Nagios exit codes in English
 UNKNOWN  = 3
@@ -164,7 +170,7 @@ def extract_serial_number():
 def extract_serial_number_snmp( hostname, community_string='public', 
                                 mtk_installed=False ):
     '''Extracts the serial number from the a remote host using SNMP.
-    This function takes the following arguments: community, hostname 
+    This function takes the following arguments: hostname, community, 
     and mtk. The mtk argument will make the plug-in read the SNMP 
     community string from /etc/mtk.conf. (/etc/mtk.conf is used by 
     the mtk-nagios plugin. 
@@ -232,7 +238,7 @@ def extract_serial_number_snmp( hostname, community_string='public',
         if os.path.isfile(mtk_conf_file):
             try:
                 conf_file = open(mtk_conf_file, 'r')
-            except:
+            except IOError:
                 print 'Unable to open {0}, exiting!'.format(mtk_conf_file)
                 sys.exit(UNKNOWN)
                 
@@ -283,11 +289,11 @@ def extract_serial_number_snmp( hostname, community_string='public',
                                 hostname, community_string)
     
     if snmp_out.find('SNMPv2-SMI::enterprises.674.10892.1.') != -1: 
-        sysType = 'omsa'          #OMSA answered.
+        sys_type = 'omsa'          #OMSA answered.
     elif snmp_out.find('SNMPv2-SMI::enterprises.674.10892.2.') != -1: 
-        sysType = 'RAC'           #Blade CMC or Server DRAC answered.
+        sys_type = 'RAC'           #Blade CMC or Server DRAC answered.
     elif snmp_out.find('SNMPv2-SMI::enterprises.674.10895.')  != -1:  
-        sysType = 'powerconnect'  #PowerConnect switch answered. 
+        sys_type = 'powerconnect'  #PowerConnect switch answered. 
     else:
         print ('snmpgetnext Failed: {0} System '
                'type or system unknown!').format(snmp_out)
@@ -295,7 +301,7 @@ def extract_serial_number_snmp( hostname, community_string='public',
 
     #System is server with OMSA, will check for External DAS enclosure 
     #and get service tag.
-    if sysType == 'omsa':
+    if sys_type == 'omsa':
     
         #Is External DAS Storage Enclosure connected
         #TODO: get rid of the split()
@@ -331,11 +337,11 @@ def extract_serial_number_snmp( hostname, community_string='public',
                                         hostname, community_string)
 
     # Get DRAC/CMC or PowerConnect Service Tag.
-    elif sysType == 'RAC':
+    elif sys_type == 'RAC':
         serial_number = run_snmp_command(snmpget, cmdline_get_rac_serial, 
                                          hostname, community_string)
                               
-    elif sysType == 'powerconnect':
+    elif sys_type == 'powerconnect':
         serial_number = run_snmp_command(snmpget, cmdline_get_pc_serial, 
                                          hostname, community_string)
     
@@ -421,11 +427,10 @@ def get_warranty(serial_numbers):
     #Check that all threads have exited
     while 0 in exit_mutexes: 
         time.sleep(.05)     #Give the CPU a break
-        pass
     
     return result_list
 
-def parse_exit(result_list):
+def parse_exit(result_list, short_output=False):
     '''This parses the results from the get_warranty() function and outputs 
     the appropriate information.
     '''
@@ -459,6 +464,7 @@ def parse_exit(result_list):
         
         #Pull the rows out
         rows = row_regex.findall(table)
+          
         for row in rows:
             row_list = []
             tables = table_regex.findall(row)
@@ -501,9 +507,14 @@ def parse_exit(result_list):
                 start_date = str(i8n_date(start_date))
                 end_date   = str(i8n_date(end_date))
                 
-                full_line = full_line + ' Warranty: ' + description \
-                + ', Provider: ' + provider + ', Start: ' + start_date \
-                + ', End: ' + end_date + ', Days left: ' + days_left
+                if short_output:
+                    full_line = full_line + ', End: ' + end_date \
+                    + ', Days left: ' + days_left
+                    
+                else: 
+                    full_line = full_line + ' Warranty: ' + description \
+                    + ', Provider: ' + provider + ', Start: ' + start_date \
+                    + ', End: ' + end_date + ', Days left: ' + days_left
                 
                 days.append(int(days_left))
         
@@ -521,7 +532,7 @@ def parse_exit(result_list):
         else:
             state = 'OK'
             
-        print full_line.format(state, serial_number ),
+        print full_line.format(state, serial_number),
         
     if critical:
         sys.exit(CRITICAL)
@@ -576,7 +587,7 @@ thirty days remaining and critical when there is less than ten days
 remaining. These values can be adjusted using the command line, see --help.
 ''',
                                    prog="check_dell_warranty",
-                                   version="%prog Version: 1.9")
+                                   version="%prog Version: 2.0")
     parser.add_option('-C', '--community', action='store', 
                       dest='community_string', type='string',default='public', 
                       help=('SNMP Community String to use. '
@@ -598,6 +609,11 @@ remaining. These values can be adjusted using the command line, see --help.
                        help=('Dell Service Tag of system, to enter more than '
                       'one use multiple flags (Default: auto-detected)'),  
                       action='append', metavar='<ARG>')
+    parser.add_option('-S', '--short', dest='short_output', 
+                      action='store_true', default = False,
+                      help=('Display short output: only the status, '
+                      'service tag, end date and days left for each '
+                      'warranty.'))
     parser.add_option('-t', '--timeout', dest='timeout', default=10,
                       help=('Set the timeout for the program to run '
                       '(Default: %default seconds)'), type='int', 
@@ -612,16 +628,16 @@ remaining. These values can be adjusted using the command line, see --help.
     signal.alarm(options.timeout)
     
     if options.serial_number:
-        serial_numbers = options.serial_number
+        SERIAL_NUMBERS = options.serial_number
     elif options.hostname or options.mtk_installed:
-        serial_numbers = extract_serial_number_snmp(options.hostname,
+        SERIAL_NUMBERS = extract_serial_number_snmp(options.hostname,
                                                     options.community_string,
                                                     options.mtk_installed)
     else:
-        serial_numbers = extract_serial_number()
+        SERIAL_NUMBERS = extract_serial_number()
     
-    result = get_warranty(serial_numbers)
+    RESULT = get_warranty(SERIAL_NUMBERS)
     
     signal.alarm(0)
     
-    parse_exit(result)
+    parse_exit(RESULT, options.short_output)
