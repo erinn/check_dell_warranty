@@ -10,7 +10,7 @@ using the command line, see --help.
 Version: 2.0                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
-Revised: 2009-08-12                                                                
+Revised: 2009-11-16                                                                
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 '''
 
@@ -20,8 +20,10 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 #
 # Revision history:
 #
-# 2.0: Fix formatting issues, change some variable names, fix a file 
-# open exception issue, 
+# 2009-11-16 2.0: Fix formatting issues, change some variable names, fix 
+# a file open exception issue, Dell changed the interface so updated to 
+# work with that, no option --short for short output.
+#
 # 2009-08-07 1.9: Add smbios as a way to get the serial number. 
 # Move away from old string formatting to new string formatting.
 #
@@ -495,13 +497,13 @@ def parse_exit(result_list, short_output=False):
             #Because there can be multiple warranties for one system we get
             #them all
             warranties = parse_table(match)
-           
+            
             #Remove the header lines. 
             warranties.pop(0)
             
             for entry in warranties:
-                (description, provider, start_date, end_date, 
-                 days_left) = entry[0:5]
+                (description, provider, warranty_extenstion, start_date, 
+                 end_date, days_left) = entry[0:6]
                 
                 #Convert the dates to international standard
                 start_date = str(i8n_date(start_date))
@@ -550,7 +552,7 @@ def sigalarm_handler(signum, frame):
     sys.exit(CRITICAL)
     
 def which(program):
-    '''This is the equivlant of the 'which' BASH builtin with a check to 
+    '''This is the equivalent of the 'which' BASH built-in with a check to 
     make sure the program that is found is executable.
     '''
     
