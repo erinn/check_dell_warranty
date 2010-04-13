@@ -19,6 +19,9 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 #
 # Revision history:
 #
+# 2010-04-13 2.1.1: Change to deal with Dell's change to their website
+# dropping the warranty extension field.
+#
 # 2009-12-17 2.1: Change format back to % to be compatible with python 2.4
 # and older.
 #
@@ -503,8 +506,8 @@ def parse_exit(result_list, short_output=False):
             warranties.pop(0)
             
             for entry in warranties:
-                (description, provider, warranty_extenstion, start_date, 
-                 end_date, days_left) = entry[0:6]
+                (description, provider, start_date, end_date, 
+                 days_left) = entry[0:5]
                 
                 #Convert the dates to international standard
                 start_date = str(i8n_date(start_date))
