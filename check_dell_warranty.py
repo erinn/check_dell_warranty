@@ -366,6 +366,10 @@ def get_warranty(serial_numbers):
     import time
     import urllib2
     
+    # Remove duplicates:
+    if len( serial_numbers ) > 1:
+        serial_numbers = dict.keys(dict.fromkeys(serial_numbers))
+    
     thread_id = 0
     result_list = []
     list_write_mutex = thread.allocate_lock()
@@ -421,10 +425,6 @@ def get_warranty(serial_numbers):
         
         thread.exit()                   #Not necessary, but pretty
     
-    # Remove duplicates:
-    if len( serial_numbers ) > 1:
-        serial_numbers = dict.keys(dict.fromkeys(serial_numbers))
-          
     for serial_number in serial_numbers:
         thread.start_new(fetch_result, (thread_id, serial_number, 
                                         dell_url, regex))
