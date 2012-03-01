@@ -7,17 +7,24 @@ when there is less than ten days remaining. These values can be adjusted
 using the command line, see --help.
 
                                                  
-Version: 2.1                                                                
+Version: 2.2.0                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
-Revised: 2009-12-17                                                                
-Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
+Revised: 2012-02-08
+Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas, Jim Browne
 '''
 
 #=============================================================================
 # TODO: omreport md enclosures, cap the threads, tests, more I suppose
 #
 # Revision history:
+#
+# 201-01-08: Fix to work with new website, had to add cookie handeling to 
+# prod the site correctly to allow scrapping of the information.
+#
+# 2010-07-19 2.1.2: Patch to again fix Dell's web page changes, thanks 
+# to Jim Browne http://blog.jbrowne.com/ as well as a patch to work against
+# OM 5.3
 #
 # 2010-04-13 2.1.1: Change to deal with Dell's change to their website
 # dropping the warranty extension field.
@@ -89,7 +96,7 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 import os
 import sys
 
-__version__ = '2.1'
+__version__ = '2.2.0'
 
 #Nagios exit codes in English
 UNKNOWN  = 3
@@ -312,8 +319,13 @@ def extract_serial_number_snmp( hostname, community_string='public',
         #TODO: get rid of the split()
         snmp_out = run_snmp_command(snmpwalk, cmdline_get_stor_encl,
                                 hostname, community_string).split('\n')
+
         
         for encl_id in snmp_out:
+            
+            #For backwards compatibility with OM 5.3
+            if not encl_id: continue
+            
             #Get enclosure type.
             #   1: Internal
             #   2: DellTM PowerVaultTM 200S (PowerVault 201S)
@@ -327,7 +339,9 @@ def extract_serial_number_snmp( hostname, community_string='public',
             encl_type = run_snmp_command(snmpget, cmdline_get_stor_encl_type,
                                       hostname, community_string, 
                                       encl_id)
-                              
+            
+
+            
             if encl_type != '1':  #Enclosure type 1 is integrated backplane.
                 #Get storage enclosure Service Tag.
                 encl_serial_number = run_snmp_command(snmpget, 
@@ -361,6 +375,7 @@ def get_warranty(serial_numbers):
     against Dell's database.
     '''
     
+    import cookielib
     import re
     import thread
     import time
@@ -372,13 +387,14 @@ def get_warranty(serial_numbers):
     exit_mutexes = [0] * len(serial_numbers)
     
     #The URL to Dell's site
-    dell_url = ('http://support.dell.com/support/topics/global.aspx/support/'
-    + 'my_systems_info/details?c=us&l=en&s=gen&ServiceTag=')
+    dell_url = ('https://www.dell.com/support/troubleshooting/us/en/04/'
+                'TroubleShooting/Display_Warranty_Tab?name='
+                'TroubleShooting_WarrantyTab')
     
     pattern = r"""(                         #Capture
                   <table                    #Beginning of table
                   .*?                       #Non-greedy match
-                  class="contract_table"    #Get the right table
+                  class="uif_table"         #Get the right table
                   .*?                       #Non-greedy match
                   </table>)"""              #Closing tag
                               
@@ -392,29 +408,55 @@ def get_warranty(serial_numbers):
         passed as well as the url and the regex to pull the info.
         '''
         
+        #Build the cookie configuration
+        urlopen = urllib2.urlopen
+        cj = cookielib.CookieJar()
+        Request = urllib2.Request
+        
+        opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
+        urllib2.install_opener(opener)
+        
+        #Build the cookie
+        cookie = cookielib.Cookie(version=0, name='OLRProduct', 
+                                  value='OLRProduct=' + serial_number + '|',
+                                  port=None, port_specified=False, 
+                                  domain='.dell.com', 
+                                  domain_specified=True, 
+                                  domain_initial_dot=True, path='/', 
+                                  path_specified=True, secure=False, 
+                                  expires=None, discard=True, comment=None, 
+                                  comment_url=None, rest={'HttpOnly': None})
+        cj.set_cookie(cookie)
+        
+        txdata = None
+        txheaders =  {'User-agent' : 
+                      'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)'}
+        
         #Basic check of the serial number.
         if len( serial_number ) != 7 and len( serial_number ) != 5:
             print 'Invalid serial number: %s exiting!' % (serial_number)
             sys.exit(WARNING)
-               
-        #Build the full URL
-        full_url = dell_url + serial_number
         
         #Try to open the page, exit on failure
         try:
-            response = urllib2.urlopen(full_url)
+            req = Request(dell_url, txdata, txheaders)
+            response = urlopen(req)
         except URLError, error:
             if hasattr(error, 'reason'):
                 print ('Unable to open URL: '
-                       '%s exiting! %s') % (full_url, error.reason)
+                       '%s exiting! %s') % (dell_url, error.reason)
                 sys.exit(UNKNOWN)
             elif hasattr(error, 'code'):
                 print ('The server is unable to fulfill '
                 'the request, error: %s') % (error.code)
                 sys.exit(UNKNOWN)  
-              
+        
+        #Just to be tidy
+        cj.clear()
+        
         list_write_mutex.acquire()      #Acquire our lock to write to the list
         result_list.append((regex.findall(response.read()), serial_number))
+        
         list_write_mutex.release()      #Release the lock
         
         exit_mutexes[thread_id] = 1     #Communicate that this thread is done
@@ -470,7 +512,7 @@ def parse_exit(result_list, short_output=False):
         
         #Pull the rows out
         rows = row_regex.findall(table)
-          
+        
         for row in rows:
             row_list = []
             tables = table_regex.findall(row)
@@ -502,12 +544,10 @@ def parse_exit(result_list, short_output=False):
             #them all
             warranties = parse_table(match)
             
-            #Remove the header lines. 
-            warranties.pop(0)
-            
             for entry in warranties:
                 (description, provider, start_date, end_date, 
                  days_left) = entry[0:5]
+                 
                 
                 #Convert the dates to international standard
                 start_date = str(i8n_date(start_date))
@@ -596,7 +636,7 @@ thirty days remaining and critical when there is less than ten days
 remaining. These values can be adjusted using the command line, see --help.
 ''',
                                    prog="check_dell_warranty",
-                                   version="%prog Version: 2.1")
+                                   version="%prog Version: 2.1.2")
     parser.add_option('-C', '--community', action='store', 
                       dest='community_string', type='string',default='public', 
                       help=('SNMP Community String to use. '
