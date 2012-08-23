@@ -7,10 +7,10 @@ when there is less than ten days remaining. These values can be adjusted
 using the command line, see --help.
 
                                                  
-Version: 2.2.0                                                                
+Version: 2.2.2                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
-Revised: 2012-02-08
+Revised: 2012-07-03
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas, Jim Browne
 '''
 
@@ -18,9 +18,13 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas, Jim Browne
 # TODO: omreport md enclosures, cap the threads, tests, more I suppose
 #
 # Revision history:
+# 2012-07-30 2.2.2: Make regex slightly more robust on scrape.
 #
-# 201-01-08: Fix to work with new website, had to add cookie handeling to 
-# prod the site correctly to allow scrapping of the information.
+# 2012-07-03 2.2.1: Fix version number mismatch, fix urllib exception catch, 
+# thanks go to Sven Odermatt for finding that.
+#
+# 2012-01-08 2.2.0: Fix to work with new website, had to add cookie handeling
+#to prod the site correctly to allow scrapping of the information.
 #
 # 2010-07-19 2.1.2: Patch to again fix Dell's web page changes, thanks 
 # to Jim Browne http://blog.jbrowne.com/ as well as a patch to work against
@@ -96,7 +100,7 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas, Jim Browne
 import os
 import sys
 
-__version__ = '2.2.0'
+__version__ = '2.2.2'
 
 #Nagios exit codes in English
 UNKNOWN  = 3
@@ -394,7 +398,7 @@ def get_warranty(serial_numbers):
     pattern = r"""(                         #Capture
                   <table                    #Beginning of table
                   .*?                       #Non-greedy match
-                  class="uif_table"         #Get the right table
+                  class="uif_table.*?"         #Get the right table
                   .*?                       #Non-greedy match
                   </table>)"""              #Closing tag
                               
@@ -441,7 +445,7 @@ def get_warranty(serial_numbers):
         try:
             req = Request(dell_url, txdata, txheaders)
             response = urlopen(req)
-        except URLError, error:
+        except urllib2.URLError, error:
             if hasattr(error, 'reason'):
                 print ('Unable to open URL: '
                        '%s exiting! %s') % (dell_url, error.reason)
@@ -524,7 +528,6 @@ def parse_exit(result_list, short_output=False):
             results.append(row_list)
         
         return results
-    
     
     for result in result_list:
         days = []
@@ -636,7 +639,7 @@ thirty days remaining and critical when there is less than ten days
 remaining. These values can be adjusted using the command line, see --help.
 ''',
                                    prog="check_dell_warranty",
-                                   version="%prog Version: 2.1.2")
+                                   version="%prog Version: 2.2.2")
     parser.add_option('-C', '--community', action='store', 
                       dest='community_string', type='string',default='public', 
                       help=('SNMP Community String to use. '
