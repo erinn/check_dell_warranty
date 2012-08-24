@@ -7,10 +7,10 @@ when there is less than ten days remaining. These values can be adjusted
 using the command line, see --help.
 
                                                  
-Version: 2.2.2                                                                
+Version: 2.2.3                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
-Revised: 2012-07-03
+Revised: 2012-08-23
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas, Jim Browne
 '''
 
@@ -18,6 +18,9 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas, Jim Browne
 # TODO: omreport md enclosures, cap the threads, tests, more I suppose
 #
 # Revision history:
+# 2012-08-23: Merge in patch from Colin Panisset to dedup serials before
+# mutex is created
+#
 # 2012-07-30 2.2.2: Make regex slightly more robust on scrape.
 #
 # 2012-07-03 2.2.1: Fix version number mismatch, fix urllib exception catch, 
@@ -639,7 +642,7 @@ thirty days remaining and critical when there is less than ten days
 remaining. These values can be adjusted using the command line, see --help.
 ''',
                                    prog="check_dell_warranty",
-                                   version="%prog Version: 2.2.2")
+                                   version="%prog Version: 2.2.3")
     parser.add_option('-C', '--community', action='store', 
                       dest='community_string', type='string',default='public', 
                       help=('SNMP Community String to use. '
