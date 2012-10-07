@@ -10,7 +10,7 @@ using the command line, see --help.
 Version: 3.0                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
-Revised: 2010-08-18                                                                
+Revised: 2010-08-23                                                                
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 '''
 
@@ -18,6 +18,21 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 # TODO: omreport md enclosures, cap the threads, tests, more I suppose
 #
 # Revision history:
+#
+# 2012-08-23 2.2.3: Merge in patch from Colin Panisset to dedup serials before
+# mutex is created
+#
+# 2012-07-30 2.2.2: Make regex slightly more robust on scrape.
+#
+# 2012-07-03 2.2.1: Fix version number mismatch, fix urllib exception catch, 
+# thanks go to Sven Odermatt for finding that.
+#
+# 2012-01-08 2.2.0: Fix to work with new website, had to add cookie handeling
+#to prod the site correctly to allow scrapping of the information.
+#
+# 2010-07-19 2.1.2: Patch to again fix Dell's web page changes, thanks 
+# to Jim Browne http://blog.jbrowne.com/ as well as a patch to work against
+# OM 5.3
 #
 # 2010-04-13 2.1.1: Change to deal with Dell's change to their web site
 # dropping the warranty extension field.
@@ -375,6 +390,11 @@ def get_warranty(serial_numbers):
     thread_id = 0
     result_list = []
     list_write_mutex = thread.allocate_lock()
+    
+    # Remove duplicates:
+    if len( serial_numbers ) > 1:
+        serial_numbers = dict.keys(dict.fromkeys(serial_numbers))
+    
     exit_mutexes = [0] * len(serial_numbers)
     
     #The URL to Dell's site
@@ -464,10 +484,6 @@ def get_warranty(serial_numbers):
         
         thread.exit()                   #Not necessary, but pretty
     
-    # Remove duplicates:
-    if len( serial_numbers ) > 1:
-        serial_numbers = dict.keys(dict.fromkeys(serial_numbers))
-          
     for serial_number in serial_numbers:
         thread.start_new(fetch_result, (thread_id, serial_number, 
                                         dell_url, regex))
