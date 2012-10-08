@@ -586,8 +586,8 @@ def parse_exit(result_list, short_output=False):
                 days_left = (end_date - datetime.date.today()).days
                 
                 if short_output:
-                    full_line = full_line + ', End: ' + end_date \
-                    + ', Days left: ' + days_left
+                    full_line = full_line + ', End: ' + str(end_date) \
+                    + ', Days left: ' + str(days_left)
                     
                 else: 
                     full_line = full_line + ' Warranty: ' + description \
