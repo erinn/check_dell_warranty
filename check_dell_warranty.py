@@ -7,18 +7,32 @@ when there is less than ten days remaining. These values can be adjusted
 using the command line, see --help.
 
                                                  
+<<<<<<< HEAD
 Version: 2.2.3                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
 Revised: 2012-08-23
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas, Jim Browne
+=======
+Version: 3.0.1                                                                
+Created: 2009-02-12                                                         
+Author: Erinn Looney-Triggs                                                 
+Revised: 2012-10-07                                                                
+Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
+>>>>>>> 3.0
 '''
 
 #=============================================================================
 # TODO: omreport md enclosures, cap the threads, tests, more I suppose
 #
 # Revision history:
-# 2012-08-23: Merge in patch from Colin Panisset to dedup serials before
+=======
+#
+# 2012-10-27: 3.0.1 Dell dropped the counter for days left from their site, 
+# this is now calculated internally. Add patch for european style dates
+# with periods between that numbers.
+#
+# 2012-08-23 2.2.3: Merge in patch from Colin Panisset to dedup serials before
 # mutex is created
 #
 # 2012-07-30 2.2.2: Make regex slightly more robust on scrape.
@@ -33,7 +47,7 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas, Jim Browne
 # to Jim Browne http://blog.jbrowne.com/ as well as a patch to work against
 # OM 5.3
 #
-# 2010-04-13 2.1.1: Change to deal with Dell's change to their website
+# 2010-04-13 2.1.1: Change to deal with Dell's change to their web site
 # dropping the warranty extension field.
 #
 # 2009-12-17 2.1: Change format back to % to be compatible with python 2.4
@@ -100,16 +114,50 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas, Jim Browne
 #                                       
 #=============================================================================
 
+import logging
 import os
 import sys
 
-__version__ = '2.2.2'
+__author__ = 'Erinn Looney-Triggs'
+__credits__ = ['Erinn Looney-Triggs', 'Justin Ellison', 'Harald Jensas' ]
+__license__ = 'GPL 3.0'
+__maintainer__ = 'Erinn Looney-Triggs'
+__email__ = 'erinn.looneytriggs@gmail.com'
+__version__ = 3.0.1
+__status__ = 'Production'
 
 #Nagios exit codes in English
 UNKNOWN  = 3
 CRITICAL = 2
 WARNING  = 1
-OK       = 0   
+OK       = 0
+
+
+    
+def extract_mtk_community():
+    # Get SNMP community string from /etc/mtk.conf
+
+    mtk_conf_file = '/etc/mtk.conf'
+    
+    if os.path.isfile(mtk_conf_file):
+        try:
+            conf_file = open(mtk_conf_file, 'r')
+        except IOError:
+            print 'Unable to open %s, exiting!' % (mtk_conf_file)
+            sys.exit(UNKNOWN)
+            
+            #Iterate over the file and search for the community_string   
+        for line in conf_file:
+            token = line.split('=')
+            if token[0] == 'community_string':
+                community_string = token[1].strip()
+            conf_file.close()
+    else:
+        print ('The %s file does not exist, '
+               'exiting!') % (mtk_conf_file)
+        sys.exit(UNKNOWN)
+        
+    return community_string
 
 def extract_serial_number():
     '''Extracts the serial number from the localhost using (in order of
@@ -127,8 +175,10 @@ def extract_serial_number():
     
     #Test for the libsmbios module
     try:
+        logger.debug('Attempting to load libsmbios_c.')
         import libsmbios_c
     except ImportError:
+        logger.debug('Unable to load libsmbios_c continuing.')
         pass                #Module does not exist, move on
     else:
         libsmbios = True
@@ -143,7 +193,7 @@ def extract_serial_number():
                                  stdout=subprocess.PIPE, 
                                  stderr=subprocess.PIPE)
         except OSError:
-            print 'Error:', sys.exc_info, 'exiting!'
+            print 'Error: {0} exiting!'.format(sys.exc_info)
             sys.exit(WARNING)
             
         text = process.stdout.read()
@@ -154,8 +204,8 @@ def extract_serial_number():
     elif libsmbios:
         #You have to be root to extract the serial number via this method
         if os.geteuid() != 0: 
-            print ('%s must be run as root in order to access '
-            'libsmbios, exiting!') % sys.argv[0]
+            print ('{0} must be run as root in order to access '
+            'libsmbios, exiting!').format(sys.argv[0])
             sys.exit(WARNING)
         
         serial_numbers.append(libsmbios_c.system_info.get_service_tag())
@@ -176,7 +226,7 @@ def extract_serial_number():
                                    stdout=subprocess.PIPE, 
                                    stderr=subprocess.PIPE)
         except OSError:
-            print 'Error:', sys.exc_info, 'exiting!'
+            print 'Error: {0} exiting!'.format(sys.exc_info)
             sys.exit(WARNING)
         serial_numbers.append(process.stdout.read().strip())
         
@@ -187,8 +237,7 @@ def extract_serial_number():
     
     return serial_numbers
 
-def extract_serial_number_snmp( hostname, community_string='public', 
-                                mtk_installed=False ):
+def extract_serial_number_snmp( options ):
     '''
     Extracts the serial number from the a remote host using SNMP.
     This function takes the following arguments: hostname, community, 
@@ -197,183 +246,145 @@ def extract_serial_number_snmp( hostname, community_string='public',
     the mtk-nagios plugin. 
     (mtk-nagios plug-in: http://www.hpccommunity.org/sysmgmt/)
     '''
-
-    def run_snmp_command(snmp_cmd, cmdline, hostname, community_string, 
-                         encl_id=None):
-        '''
-        Runs the command specified in snmp_cmd and collects the 
-        output, the output is then sanitized to be passed back to 
-        the requester.
-        '''
-        import subprocess
-        
-        if encl_id: 
-            cmdline = cmdline % (snmp_cmd, 
-                                     community_string, hostname, encl_id)
-        else: 
-            cmdline = cmdline % (snmp_cmd, community_string, hostname)
-        
-        try:
-            p = subprocess.Popen(cmdline, shell=True, 
-                                 stdout = subprocess.PIPE, 
-                                 stderr = subprocess.STDOUT)
-        except OSError:
-            print 'Error:', sys.exc_info, 'exiting!'
-            sys.exit(WARNING) 
-        
-        #This is where we sanitize the output gathered.
-        output = p.stdout.read()
-       
-        #Things we don't want in the strings:
-        replacement_strings = {'"':'', 'STRING: ':'', 'INTEGER: ':'' }
-        
-        #Strip them out:
-        for old, new in replacement_strings.iteritems():
-            output = output.replace(old, new).strip()
-        
-        #This output should be clean now.
-        return output
+    try:
+        import netsnmp
+    except ImportError:
+        print "Unable to load netsnmp python module, aborting!"
+        sys.exit(UNKNOWN)
     
     serial_numbers = []
-    snmpget = which('snmpget')
-    snmpgetnext = which('snmpgetnext')
-    snmpwalk = which('snmpwalk')
+    hostname = options.hostname
+    port = options.port
+    version = options.version           
     
-    #Test that we actually have snmpget, snmpgetnext and snmpwalk installed 
-    if not snmpget:
-        print 'Unable to locate snmpget, exiting!'
-        sys.exit(UNKNOWN)
-    if not snmpgetnext:
-        print 'Unable to locate snmpgetnext, exiting!'
-        sys.exit(UNKNOWN)
-    if not snmpwalk:
-        print 'Unable to locate snmpwalk, exiting!'
-        sys.exit(UNKNOWN)
-
-    # Get SNMP community string from /etc/mtk.conf
-    if mtk_installed:
-        mtk_conf_file = '/etc/mtk.conf'
+    if version == 3:
+        sec_level = options.secLevel
+        sec_name = options.secName
+        priv_protocol = options.privProtocol
+        priv_password = options.privPassword
+        auth_protocol = options.authProtocol
+        auth_password = options.authPassword
         
-        if os.path.isfile(mtk_conf_file):
-            try:
-                conf_file = open(mtk_conf_file, 'r')
-            except IOError:
-                print 'Unable to open %s, exiting!' % (mtk_conf_file)
-                sys.exit(UNKNOWN)
-                
-                #Iterate over the file and search for the community_string   
-            for line in conf_file:
-                token = line.split('=')
-                if token[0] == 'community_string':
-                    community_string = token[1].strip()
-                conf_file.close()
-        else:
-            print ('The %s file does not exist, '
-                   'exiting!') % (mtk_conf_file)
-            sys.exit(UNKNOWN)
-                
-    
-    #SnmpGetNext - Get next OID in Dell tree to decide device type
-    cmdline_snmpgetnext          = ('%s -v1 -c %s %s '
-                                    'SNMPv2-SMI::enterprises.674') 
-    #SnmpWalk - Get storage enclosure ID's
-    cmdline_get_stor_encl        = ('%s -v1 -Ov -c %s %s '
-                                    'SNMPv2-SMI::enterprises.674.'
-                                    '10893.1.20.130.3.1.1') 
-    #SnmpGet - Get storage enclosure type's
-    cmdline_get_stor_encl_type   = ('%s -v1 -Ov -c %s %s '
-                                    'SNMPv2-SMI::enterprises.674.'
-                                    '10893.1.20.130.3.1.16.%s') 
-    #SnmpGet - Get storage enclosure serial number
-    cmdline_get_stor_encl_serial = ('%s -v1 -Ov -c %s %s '
-                                    'SNMPv2-SMI::enterprises.674.'
-                                    '10893.1.20.130.3.1.8.%s') 
-    #SnmpGet - Get server serial number (OMSA)
-    cmdline_get_server_serial    = ('%s -v1 -Ov -c %s %s '
-                                    'SNMPv2-SMI::enterprises.674.'
-                                    '10892.1.300.10.1.11.1') 
-    #SnmpGet - Get server/blade chassis serial number (RAC)
-    cmdline_get_rac_serial       = ('%s -v1 -Ov -c %s %s '
-                                    'SNMPv2-SMI::enterprises.674.'
-                                    '10892.2.1.1.11.0') 
-    #SnmpGet - Get PowerConnect switch serial number
-    cmdline_get_pc_serial        = ('%s -v1 -Ov -c %s %s '
-                                    'SNMPv2-SMI::enterprises.674.'
-                                    '10895.3000.1.2.100.8.1.4.1') 
-
-
-    
-    #Figure out device type OMSA on Server, DRAC/CMC or PowerConnect Switch
-    snmp_out = run_snmp_command(snmpgetnext, cmdline_snmpgetnext, 
-                                hostname, community_string)
-    
-    if snmp_out.find('SNMPv2-SMI::enterprises.674.10892.1.') != -1: 
-        sys_type = 'omsa'          #OMSA answered.
-    elif snmp_out.find('SNMPv2-SMI::enterprises.674.10892.2.') != -1: 
-        sys_type = 'RAC'           #Blade CMC or Server DRAC answered.
-    elif snmp_out.find('SNMPv2-SMI::enterprises.674.10895.')  != -1:  
-        sys_type = 'powerconnect'  #PowerConnect switch answered. 
+        session = netsnmp.Session(DestHost=hostname, Version=version, 
+                                  SecLevel=sec_level, SecName=sec_name, 
+                                  AuthProto=auth_protocol, 
+                                  AuthPass=auth_password,
+                                  PrivProto=priv_protocol,
+                                  PrivPass=priv_password,
+                                  RemotePort = port,
+                                  )
+        
+    elif version == 2 or version == 1:
+        community = options.community
+        
+        session = netsnmp.Session(DestHost=hostname, Version=version,
+                                  Community=community, RemotePort=port)
+        
     else:
-        print ('snmpgetnext Failed: %s System '
-               'type or system unknown!') % (snmp_out)
-        sys.exit(WARNING)
-
-    #System is server with OMSA, will check for External DAS enclosure 
-    #and get service tag.
-    if sys_type == 'omsa':
+        print 'Unknown SNMP version {0}, exiting!'.format(version)
     
-        #Is External DAS Storage Enclosure connected
-        #TODO: get rid of the split()
-        snmp_out = run_snmp_command(snmpwalk, cmdline_get_stor_encl,
-                                hostname, community_string).split('\n')
 
+    def _autodetect_dell_device(session):
         
-        for encl_id in snmp_out:
+        logger.debug('Beginning auto detection of system type.')
+        
+        var = netsnmp.VarList(netsnmp.Varbind('SNMPv2-SMI::enterprises', 
+                                              '.674.'))
+        session.getnext(var)
+        tag = var.varbinds.pop().tag
+    
+        if tag.find('enterprises.674.10892.1.') != -1: 
+            sys_type = 'omsa'          #OMSA answered.
+        elif tag.find('enterprises.674.10892.2.') != -1: 
+            sys_type = 'RAC'           #Blade CMC or Server DRAC answered.
+        elif tag.find('enterprises.674.10895.')  != -1:  
+            sys_type = 'powerconnect'  #PowerConnect switch answered. 
+        else:
+            print ('snmpgetnext Failed:{0} System type or system '
+                   'unknown!').format(tag)
+            sys.exit(WARNING)
+        
+        logger.debug('System type is: {0}'.format(sys_type))
+        
+        return sys_type
+        
+    system_type = _autodetect_dell_device(session)
+    
+    #System is server with OMSA, will check for External DAS enclosure 
+    #and get service tag.    
+    if system_type == 'omsa':
+        
+        #Is External DAS Storage Enclosure connected?
+        var = netsnmp.VarList(netsnmp.Varbind('SNMPv2-SMI::enterprises',
+                                              '.674.10893.1.20.130.3.1.1'))
+        enclosure_ids = session.walk(var)
+        
+        logger.debug('Enclosure IDs: {0}'.format(enclosure_ids))
+        
+        for enclosure_id in enclosure_ids:
             
             #For backwards compatibility with OM 5.3
-            if not encl_id: continue
+            if not enclosure_id: continue
             
-            #Get enclosure type.
-            #   1: Internal
-            #   2: DellTM PowerVaultTM 200S (PowerVault 201S)
-            #   3: Dell PowerVault 210S (PowerVault 211S)
-            #   4: Dell PowerVault 220S (PowerVault 221S)
-            #   5: Dell PowerVault 660F
-            #   6: Dell PowerVault 224F
-            #   7: Dell PowerVault 660F/PowerVault 224F
-            #   8: Dell MD1000
-            #   9: Dell MD1120
-            encl_type = run_snmp_command(snmpget, cmdline_get_stor_encl_type,
-                                      hostname, community_string, 
-                                      encl_id)
+            var = netsnmp.VarList(netsnmp.Varbind('SNMPv2-SMI::enterprises',
+                                                  '.674.10893.1.20.130.3.1.16.{0}'.format(enclosure_id)))
             
-
+            enclosure_type = session.get(var)[0]
             
-            if encl_type != '1':  #Enclosure type 1 is integrated backplane.
+            logger.debug('Enclosure type: {0}'.format(enclosure_type))
+            
+            if enclosure_type != '1': #Enclosure type 1 is integrated backplane.
+                
                 #Get storage enclosure Service Tag.
-                encl_serial_number = run_snmp_command(snmpget, 
-                                                      cmdline_get_stor_encl_serial, 
-                                                      hostname, 
-                                                      community_string, 
-                                                      encl_id)
-                serial_numbers.append(encl_serial_number)
-
+                var =  netsnmp.VarList(netsnmp.Varbind('SNMPv2-SMI::enterprises',
+                                                       '.674.10893.1.20.130.3.1.8.{0}'.format(enclosure_id)))
+                enclosure_serial_number = session.get(var)[0]
+                
+                logger.debug('Enclosure Serial Number obtained: {0}'
+                              .format(enclosure_serial_number))
+                
+                serial_numbers.append(enclosure_serial_number)
+                
         #Get system Service Tag.
-        serial_number = run_snmp_command(snmpget, cmdline_get_server_serial, 
-                                        hostname, community_string)
-
-    # Get DRAC/CMC or PowerConnect Service Tag.
-    elif sys_type == 'RAC':
-        serial_number = run_snmp_command(snmpget, cmdline_get_rac_serial, 
-                                         hostname, community_string)
-                              
-    elif sys_type == 'powerconnect':
-        serial_number = run_snmp_command(snmpget, cmdline_get_pc_serial, 
-                                         hostname, community_string)
+        var = netsnmp.VarList(netsnmp.Varbind('SNMPv2-SMI::enterprises',
+                                              '.674.10892.1.300.10.1.11.1'))
+        
+        serial_number = session.get(var)[0]
+    
+    elif system_type == 'RAC':
+        var = netsnmp.VarList(netsnmp.Varbind('SNMPv2-SMI::enterprises',
+                                              '.674.10892.2.1.1.11.0'))
+        serial_number = session.get(var)[0]
+        
+        logger.debug('RAC serial number obtained: {0}'.format(serial_number))
+    
+    elif system_type == 'powerconnect':
+        var = netsnmp.VarList(netsnmp.Varbind('SNMPv2-SMI::enterprises',
+                                              '.674.10895.3000.1.2.100'
+                                              '.8.1.4.1'))
+        serial_number = session.get(var)[0]
+        
+        logger.debug('PowerConnect serial number obtained: {0}'
+                      .format(serial_number))
     
     serial_numbers.append(serial_number)
-
+    
+    logger.debug('Serial numbers obtained: {0}'.format(serial_numbers))
+    
     return serial_numbers
+
+#            
+#            #Get enclosure type.
+#            #   1: Internal
+#            #   2: DellTM PowerVaultTM 200S (PowerVault 201S)
+#            #   3: Dell PowerVault 210S (PowerVault 211S)
+#            #   4: Dell PowerVault 220S (PowerVault 221S)
+#            #   5: Dell PowerVault 660F
+#            #   6: Dell PowerVault 224F
+#            #   7: Dell PowerVault 660F/PowerVault 224F
+#            #   8: Dell MD1000
+#            #   9: Dell MD1120
+
 
 def get_warranty(serial_numbers):
     '''
@@ -395,6 +406,11 @@ def get_warranty(serial_numbers):
     thread_id = 0
     result_list = []
     list_write_mutex = thread.allocate_lock()
+    
+    # Remove duplicates:
+    if len( serial_numbers ) > 1:
+        serial_numbers = dict.keys(dict.fromkeys(serial_numbers))
+    
     exit_mutexes = [0] * len(serial_numbers)
     
     #The URL to Dell's site
@@ -419,6 +435,8 @@ def get_warranty(serial_numbers):
         passed as well as the url and the regex to pull the info.
         '''
         
+        logger.debug('Thread ID: {0}, beginning connection to '
+                     'website.'.format(thread_id))
         #Build the cookie configuration
         urlopen = urllib2.urlopen
         cj = cookielib.CookieJar()
@@ -426,6 +444,8 @@ def get_warranty(serial_numbers):
         
         opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
         urllib2.install_opener(opener)
+        
+        logger.debug('Thread ID: {0}, building cookie.'.format(thread_id))
         
         #Build the cookie
         cookie = cookielib.Cookie(version=0, name='OLRProduct', 
@@ -439,6 +459,9 @@ def get_warranty(serial_numbers):
                                   comment_url=None, rest={'HttpOnly': None})
         cj.set_cookie(cookie)
         
+        logger.debug('Thread ID: {0}, cookie created with value: '
+                     '{1}.'.format(thread_id, cookie.value))
+        
         txdata = None
         txheaders =  {'User-agent' : 
                       'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)'}
@@ -450,6 +473,9 @@ def get_warranty(serial_numbers):
         
         #Try to open the page, exit on failure
         try:
+            logger.debug('Thread ID: {0}, requesting data from URL: {1},'
+                         ' with headers {2}.'.format(thread_id, dell_url, 
+                                                     txheaders))
             req = Request(dell_url, txdata, txheaders)
             response = urlopen(req)
         except urllib2.URLError, error:
@@ -483,7 +509,11 @@ def get_warranty(serial_numbers):
     while 0 in exit_mutexes: 
         time.sleep(.05)     #Give the CPU a break
     
+    logger.debug('Number of results obtained from Dell web site: '
+                 '{0}'.format(len(result_list)))
+    
     return result_list
+
 
 def parse_exit(result_list, short_output=False):
     '''This parses the results from the get_warranty() function and outputs 
@@ -502,7 +532,14 @@ def parse_exit(result_list, short_output=False):
         of yyy-mm-dd and returns it.
         '''
         
-        month, day, year = date.split('/')
+        logger.debug('Converting date: {0}'.format(date))
+        
+        #Support European Dell server date formats
+        if "." in date:
+            day, month, year = date.split('.')
+        else:
+            month, day, year = date.split('/')
+        
         return datetime.date(int(year), int(month), int(day))
         
     def parse_table(table):
@@ -551,22 +588,25 @@ def parse_exit(result_list, short_output=False):
             warranties = parse_table(match)
             
             for entry in warranties:
-                (description, provider, start_date, end_date, 
-                 days_left) = entry[0:5]
+                (description, provider, start_date, end_date) = entry[0:4]
                  
                 
                 #Convert the dates to international standard
-                start_date = str(i8n_date(start_date))
-                end_date   = str(i8n_date(end_date))
+                start_date = i8n_date(start_date)
+                end_date   = i8n_date(end_date)
+                
+                #Calculate the days remaining
+                days_left = (end_date - datetime.date.today()).days
                 
                 if short_output:
-                    full_line = full_line + ', End: ' + end_date \
-                    + ', Days left: ' + days_left
+                    full_line = full_line + ', End: ' + str(end_date) \
+                    + ', Days left: ' + str(days_left)
                     
                 else: 
                     full_line = full_line + ' Warranty: ' + description \
-                    + ', Provider: ' + provider + ', Start: ' + start_date \
-                    + ', End: ' + end_date + ', Days left: ' + days_left
+                    + ', Provider: ' + provider + ', Start: ' + \
+                    str(start_date) + ', End: ' + str(end_date) + \
+                    ', Days left: ' + str(days_left)
                 
                 days.append(int(days_left))
         
@@ -605,7 +645,8 @@ def sigalarm_handler(signum, frame):
                                             signum, frame)
     
     sys.exit(CRITICAL)
-    
+    return None
+
 def which(program):
     '''This is the equivalent of the 'which' BASH built-in with a check to 
     make sure the program that is found is executable.
@@ -629,12 +670,10 @@ def which(program):
 
     return None
 
-
-
 if __name__ == '__main__':
     import optparse
     import signal
-
+    
     parser = optparse.OptionParser(description='''Nagios plug-in to pull the 
 Dell service tag and check it against Dell's web site to see how many 
 days remain. By default it issues a warning when there is less than 
@@ -642,17 +681,31 @@ thirty days remaining and critical when there is less than ten days
 remaining. These values can be adjusted using the command line, see --help.
 ''',
                                    prog="check_dell_warranty",
+<<<<<<< HEAD
                                    version="%prog Version: 2.2.3")
+=======
+                                   version="%prog Version: 3.0.1")
+    parser.add_option('-a', dest='authProtocol', action='store',
+                      help=('Set the default authentication protocol for '
+                            'SNMPv3 (MD5 or SHA).'))
+    parser.add_option('-A', dest='authPassword', 
+                      help=('Set the SNMPv3 authentication protocol password.')
+                      )
+>>>>>>> 3.0
     parser.add_option('-C', '--community', action='store', 
-                      dest='community_string', type='string',default='public', 
+                      dest='community', type='string',default='public', 
                       help=('SNMP Community String to use. '
                       '(Default: %default)'))
     parser.add_option('-c', '--critical', dest='critical_days', default=10,
                      help=('Number of days under which to return critical '
-                     '(Default: %default)'), type='int', metavar='<ARG>')
+                     '(Default: %default).'), type='int', metavar='<ARG>')
     parser.add_option('-H', '--hostname', action='store', type='string', 
                       dest='hostname', 
                       help='Specify hostname for SNMP')
+    parser.add_option('-l', dest='secLevel', default='noAuthNoPriv',
+                      action='store',
+                      help=('Set the SNMPv3 security level, (noAuthNoPriv'
+                      '|authNoPriv|authPriv) (Default: noAuthNoPriv)'))
     parser.add_option('--mtk', action='store_true', dest='mtk_installed', 
                       default=False,
                       help=('Get SNMP Community String from /etc/mtk.conf if '
@@ -660,6 +713,9 @@ remaining. These values can be adjusted using the command line, see --help.
                       'will make the mtk.conf community string take '
                       'precedence over anything entered at the '
                       'command line (Default: %default)'))
+    parser.add_option('-p', '--port', dest='port', default=161,
+                      help=('Set the SNMP port to be connected to '
+                      '(Default:161).'), type='int')
     parser.add_option('-s', '--serial-number', dest='serial_number', 
                        help=('Dell Service Tag of system, to enter more than '
                       'one use multiple flags (Default: auto-detected)'),  
@@ -673,21 +729,46 @@ remaining. These values can be adjusted using the command line, see --help.
                       help=('Set the timeout for the program to run '
                       '(Default: %default seconds)'), type='int', 
                       metavar='<ARG>')
+    parser.add_option('-u', dest='secName', action='store',
+                      help='Set the SNMPv3 security name (user name).')
+    parser.add_option('-v', dest='version', default=3, action='store',
+                      help=('Specify the SNMP version (1, 2c, 3) Default: 3'),
+                      type='int'
+                      )
+    parser.add_option('-V', dest='verbose', action='store_true', 
+                      default=False, help =('Give verbose output (Default: '
+                                            'Off)') 
+                      )
     parser.add_option('-w', '--warning', dest='warning_days', default=30,
                       help=('Number of days under which to return a warning '
                       '(Default: %default)'), type='int', metavar='<ARG>' )
+    parser.add_option('-x', dest='privProtocol', action='store',
+                      help='Set the SNMPv3 privacy protocol (DES or AES).')
+    parser.add_option('-X', dest='privPassword', action='store',
+                      help='Set the SNMPv3 privacy pass phrase.')
     
     (options, args) = parser.parse_args()
+    
+    ##Configure logging
+    logger = logging.getLogger("check_dell_warranty")
+    handler = logging.StreamHandler()
+    if options.verbose:
+        handler.setLevel(logging.DEBUG)
+        logger.setLevel(logging.DEBUG)
         
+    ##Set the logging format, time, log level name, and the message
+    formatter = logging.Formatter('%(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    
+    logger.addHandler(handler)
+
     signal.signal(signal.SIGALRM, sigalarm_handler)
     signal.alarm(options.timeout)
     
     if options.serial_number:
         SERIAL_NUMBERS = options.serial_number
     elif options.hostname or options.mtk_installed:
-        SERIAL_NUMBERS = extract_serial_number_snmp(options.hostname,
-                                                    options.community_string,
-                                                    options.mtk_installed)
+        SERIAL_NUMBERS = extract_serial_number_snmp(options)
     else:
         SERIAL_NUMBERS = extract_serial_number()
     
@@ -696,3 +777,4 @@ remaining. These values can be adjusted using the command line, see --help.
     signal.alarm(0)
     
     parse_exit(RESULT, options.short_output)
+
