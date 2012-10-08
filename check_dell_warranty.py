@@ -19,7 +19,7 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 #
 # Revision history:
 #
-# 2012-10-27: Dell dropped the counter for days left from their site, 
+# 2012-10-27: 3.0.1 Dell dropped the counter for days left from their site, 
 # this is now calculated internally. Add patch for european style dates
 # with periods between that numbers.
 #
@@ -114,7 +114,7 @@ __credits__ = ['Erinn Looney-Triggs', 'Justin Ellison', 'Harald Jensas' ]
 __license__ = 'GPL 3.0'
 __maintainer__ = 'Erinn Looney-Triggs'
 __email__ = 'erinn.looneytriggs@gmail.com'
-__version__ = 3.0
+__version__ = 3.0.1
 __status__ = 'Production'
 
 #Nagios exit codes in English
