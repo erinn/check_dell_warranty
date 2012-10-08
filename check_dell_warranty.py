@@ -7,26 +7,17 @@ when there is less than ten days remaining. These values can be adjusted
 using the command line, see --help.
 
                                                  
-<<<<<<< HEAD
-Version: 2.2.3                                                                
-Created: 2009-02-12                                                         
-Author: Erinn Looney-Triggs                                                 
-Revised: 2012-08-23
-Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas, Jim Browne
-=======
 Version: 3.0.1                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
 Revised: 2012-10-07                                                                
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
->>>>>>> 3.0
 '''
 
 #=============================================================================
 # TODO: omreport md enclosures, cap the threads, tests, more I suppose
 #
 # Revision history:
-=======
 #
 # 2012-10-27: 3.0.1 Dell dropped the counter for days left from their site, 
 # this is now calculated internally. Add patch for european style dates
