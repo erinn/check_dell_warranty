@@ -672,9 +672,6 @@ thirty days remaining and critical when there is less than ten days
 remaining. These values can be adjusted using the command line, see --help.
 ''',
                                    prog="check_dell_warranty",
-<<<<<<< HEAD
-                                   version="%prog Version: 2.2.3")
-=======
                                    version="%prog Version: 3.0.1")
     parser.add_option('-a', dest='authProtocol', action='store',
                       help=('Set the default authentication protocol for '
@@ -682,7 +679,6 @@ remaining. These values can be adjusted using the command line, see --help.
     parser.add_option('-A', dest='authPassword', 
                       help=('Set the SNMPv3 authentication protocol password.')
                       )
->>>>>>> 3.0
     parser.add_option('-C', '--community', action='store', 
                       dest='community', type='string',default='public', 
                       help=('SNMP Community String to use. '
