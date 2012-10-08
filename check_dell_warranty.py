@@ -7,10 +7,10 @@ when there is less than ten days remaining. These values can be adjusted
 using the command line, see --help.
 
                                                  
-Version: 2.2.3                                                                
+Version: 2.2.4                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
-Revised: 2012-08-23
+Revised: 2012-10-07
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas, Jim Browne
 '''
 
@@ -18,7 +18,12 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas, Jim Browne
 # TODO: omreport md enclosures, cap the threads, tests, more I suppose
 #
 # Revision history:
-# 2012-08-23: Merge in patch from Colin Panisset to dedup serials before
+#
+# 2012-10-07 2.2.4: Dell dropped the counter for days left from their site, 
+# this is now calculated internally. Add patch for European style dates
+# with periods between that numbers.
+#
+# 2012-08-23 2.2.3: Merge in patch from Colin Panisset to dedup serials before
 # mutex is created
 #
 # 2012-07-30 2.2.2: Make regex slightly more robust on scrape.
@@ -103,7 +108,7 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas, Jim Browne
 import os
 import sys
 
-__version__ = '2.2.2'
+__version__ = '2.2.4'
 
 #Nagios exit codes in English
 UNKNOWN  = 3
@@ -501,8 +506,11 @@ def parse_exit(result_list, short_output=False):
         seperated by '/'s and converts it to ISO standard date format
         of yyy-mm-dd and returns it.
         '''
-        
-        month, day, year = date.split('/')
+        #Support European Dell server date formats
+        if "." in date:
+            day, month, year = date.split('.')
+        else:
+            month, day, year = date.split('/')
         return datetime.date(int(year), int(month), int(day))
         
     def parse_table(table):
@@ -551,22 +559,24 @@ def parse_exit(result_list, short_output=False):
             warranties = parse_table(match)
             
             for entry in warranties:
-                (description, provider, start_date, end_date, 
-                 days_left) = entry[0:5]
-                 
+                description, provider, start_date, end_date = entry[0:4]
                 
                 #Convert the dates to international standard
-                start_date = str(i8n_date(start_date))
-                end_date   = str(i8n_date(end_date))
+                start_date = i8n_date(start_date)
+                end_date   = i8n_date(end_date)
+                
+                #Calculate the days remaining
+                days_left = (end_date - datetime.date.today()).days
                 
                 if short_output:
-                    full_line = full_line + ', End: ' + end_date \
-                    + ', Days left: ' + days_left
+                    full_line = full_line + ', End: ' + str(end_date) \
+                    + ', Days left: ' + str(days_left)
                     
                 else: 
                     full_line = full_line + ' Warranty: ' + description \
-                    + ', Provider: ' + provider + ', Start: ' + start_date \
-                    + ', End: ' + end_date + ', Days left: ' + days_left
+                    + ', Provider: ' + provider + ', Start: ' + \
+                    str(start_date) + ', End: ' + str(end_date) + \
+                    ', Days left: ' + str(days_left)
                 
                 days.append(int(days_left))
         
@@ -642,7 +652,7 @@ thirty days remaining and critical when there is less than ten days
 remaining. These values can be adjusted using the command line, see --help.
 ''',
                                    prog="check_dell_warranty",
-                                   version="%prog Version: 2.2.3")
+                                   version="%prog Version: 2.2.4")
     parser.add_option('-C', '--community', action='store', 
                       dest='community_string', type='string',default='public', 
                       help=('SNMP Community String to use. '
