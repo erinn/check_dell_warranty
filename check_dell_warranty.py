@@ -7,10 +7,10 @@ when there is less than ten days remaining. These values can be adjusted
 using the command line, see --help.
 
                                                  
-Version: 3.0                                                                
+Version: 3.0.1                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
-Revised: 2010-08-23                                                                
+Revised: 2012-10-07                                                                
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 '''
 
@@ -18,6 +18,10 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 # TODO: omreport md enclosures, cap the threads, tests, more I suppose
 #
 # Revision history:
+#
+# 2012-10-27: Dell dropped the counter for days left from their site, 
+# this is now calculated internally. Add patch for european style dates
+# with periods between that numbers.
 #
 # 2012-08-23 2.2.3: Merge in patch from Colin Panisset to dedup serials before
 # mutex is created
@@ -104,7 +108,6 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 import logging
 import os
 import sys
-
 
 __author__ = 'Erinn Looney-Triggs'
 __credits__ = ['Erinn Looney-Triggs', 'Justin Ellison', 'Harald Jensas' ]
@@ -516,7 +519,13 @@ def parse_exit(result_list, short_output=False):
         of yyy-mm-dd and returns it.
         '''
         
-        month, day, year = date.split('/')
+        logger.debug('Converting date: {0}'.format(date))
+        
+        #Support European Dell server date formats
+        if "." in date:
+            day, month, year = date.split('.')
+        else:
+            month, day, year = date.split('/')
         
         return datetime.date(int(year), int(month), int(day))
         
@@ -566,13 +575,15 @@ def parse_exit(result_list, short_output=False):
             warranties = parse_table(match)
             
             for entry in warranties:
-                (description, provider, start_date, end_date, 
-                 days_left) = entry[0:5]
+                (description, provider, start_date, end_date) = entry[0:4]
                  
                 
                 #Convert the dates to international standard
-                start_date = str(i8n_date(start_date))
-                end_date   = str(i8n_date(end_date))
+                start_date = i8n_date(start_date)
+                end_date   = i8n_date(end_date)
+                
+                #Calculate the days remaining
+                days_left = (end_date - datetime.date.today()).days
                 
                 if short_output:
                     full_line = full_line + ', End: ' + end_date \
@@ -580,8 +591,9 @@ def parse_exit(result_list, short_output=False):
                     
                 else: 
                     full_line = full_line + ' Warranty: ' + description \
-                    + ', Provider: ' + provider + ', Start: ' + start_date \
-                    + ', End: ' + end_date + ', Days left: ' + days_left
+                    + ', Provider: ' + provider + ', Start: ' + \
+                    str(start_date) + ', End: ' + str(end_date) + \
+                    ', Days left: ' + str(days_left)
                 
                 days.append(int(days_left))
         
@@ -656,7 +668,7 @@ thirty days remaining and critical when there is less than ten days
 remaining. These values can be adjusted using the command line, see --help.
 ''',
                                    prog="check_dell_warranty",
-                                   version="%prog Version: 3.0")
+                                   version="%prog Version: 3.0.1")
     parser.add_option('-a', dest='authProtocol', action='store',
                       help=('Set the default authentication protocol for '
                             'SNMPv3 (MD5 or SHA).'))
