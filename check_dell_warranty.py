@@ -20,7 +20,7 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 # Revision history:
 #
 # 2012-10-27 3.0.1: Dell dropped the counter for days left from their site, 
-# this is now calculated internally. Add patch for european style dates
+# this is now calculated internally. Add patch for European style dates
 # with periods between that numbers.
 #
 # 2012-09-05 3.0: Use Net-SNMP bindings for python allowing SNMPv3 support. Add
@@ -35,7 +35,7 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 # thanks go to Sven Odermatt for finding that.
 #
 # 2012-01-08 2.2.0: Fix to work with new website, had to add cookie handeling
-#to prod the site correctly to allow scrapping of the information.
+# to prod the site correctly to allow scrapping of the information.
 #
 # 2010-07-19 2.1.2: Patch to again fix Dell's web page changes, thanks 
 # to Jim Browne http://blog.jbrowne.com/ as well as a patch to work against
