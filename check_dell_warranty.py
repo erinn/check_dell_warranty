@@ -135,6 +135,8 @@ def extract_mtk_community():
     '''
     Get SNMP community string from /etc/mtk.conf
     '''
+    logger.debug('Obtaining serial number via /etc/mtk.conf')
+    
     mtk_conf_file = '/etc/mtk.conf'
     
     if os.path.isfile(mtk_conf_file):
@@ -177,10 +179,12 @@ def extract_serial_number():
         import libsmbios_c
     except ImportError:
         logger.debug('Unable to load libsmbios_c continuing.')
+        pass
     else:
         libsmbios = True
     
     if omreport:
+        logger.debug('Obtaining serial number via OpenManage.')
         import re
         
         try:
@@ -198,6 +202,8 @@ def extract_serial_number():
         serial_numbers = regex.findall(text)
         
     elif libsmbios:
+        logger.debug('Obtaining serial number via libsmbios.')
+        
         #You have to be root to extract the serial number via this method
         if os.geteuid() != 0: 
             print ('{0} must be run as root in order to access '
@@ -207,6 +213,7 @@ def extract_serial_number():
         serial_numbers.append(libsmbios_c.system_info.get_service_tag())
            
     elif dmidecode: 
+        logger.debug('Obtaining serial number via dmidecode.')
         #Gather the information from dmidecode
         
         sudo = which('sudo')
@@ -251,6 +258,9 @@ def extract_serial_number_snmp( options ):
     hostname = options.hostname
     port = options.port
     version = options.version           
+    
+    logger.debug('Obtaining serial number via SNMP '
+                 'version: {0}'.format(version))
     
     if version == 3:
         sec_level = options.secLevel
@@ -323,8 +333,7 @@ def extract_serial_number_snmp( options ):
                 continue
             
             var = netsnmp.VarList(netsnmp.Varbind('SNMPv2-SMI::enterprises',
-                                                  '.674.10893.1.20.130.3.1.',
-                                                  '16.{0}'.format(enclosure_id)))
+                                                  '.674.10893.1.20.130.3.1.16.{0}'.format(enclosure_id)))
             
             enclosure_type = session.get(var)[0]
             
