@@ -137,7 +137,7 @@ def extract_mtk_community():
         try:
             conf_file = open(mtk_conf_file, 'r')
         except IOError:
-            print 'Unable to open %s, exiting!' % (mtk_conf_file)
+            print 'Unable to open {0}, exiting!'.format(mtk_conf_file)
             sys.exit(UNKNOWN)
             
             #Iterate over the file and search for the community_string   
@@ -147,8 +147,8 @@ def extract_mtk_community():
                 community_string = token[1].strip()
             conf_file.close()
     else:
-        print ('The %s file does not exist, '
-               'exiting!') % (mtk_conf_file)
+        print ('The {0} file does not exist, '
+               'exiting!').format(mtk_conf_file)
         sys.exit(UNKNOWN)
         
     return community_string
@@ -462,7 +462,7 @@ def get_warranty(serial_numbers):
         
         #Basic check of the serial number.
         if len( serial_number ) != 7 and len( serial_number ) != 5:
-            print 'Invalid serial number: %s exiting!' % (serial_number)
+            print 'Invalid serial number: {0} exiting!'.format(serial_number)
             sys.exit(WARNING)
         
         #Try to open the page, exit on failure
@@ -475,11 +475,11 @@ def get_warranty(serial_numbers):
         except urllib2.URLError, error:
             if hasattr(error, 'reason'):
                 print ('Unable to open URL: '
-                       '%s exiting! %s') % (dell_url, error.reason)
+                       '{0} exiting! {1}').format(dell_url, error.reason)
                 sys.exit(UNKNOWN)
             elif hasattr(error, 'code'):
                 print ('The server is unable to fulfill '
-                'the request, error: %s') % (error.code)
+                'the request, error: {0}').format(error.code)
                 sys.exit(UNKNOWN)  
         
         #Just to be tidy
@@ -634,8 +634,8 @@ def sigalarm_handler(signum, frame):
     Handler for an alarm situation.
     '''
     
-    print ('%s timed out after %s seconds, '
-           'signum:%s, frame: %s') % (sys.argv[0], options.timeout, 
+    print ('{0} timed out after {1} seconds, '
+           'signum:{2}, frame: {3}').format(sys.argv[0], options.timeout, 
                                             signum, frame)
     
     sys.exit(CRITICAL)
