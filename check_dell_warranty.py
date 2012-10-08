@@ -7,10 +7,10 @@ when there is less than ten days remaining. These values can be adjusted
 using the command line, see --help.
 
                                                  
-Version: 3.0.1                                                                
+Version: 3.0.2                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
-Revised: 2012-10-07                                                                
+Revised: 2012-10-08                                                                
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 '''
 
@@ -19,7 +19,9 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 #
 # Revision history:
 #
-# 2012-10-27 3.0.1: Dell dropped the counter for days left from their site, 
+# 2012-10-08 3.0.2: Add support for hyphen dates
+#
+# 2012-10-07 3.0.1: Dell dropped the counter for days left from their site, 
 # this is now calculated internally. Add patch for European style dates
 # with periods between that numbers.
 #
@@ -110,6 +112,7 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 
 import logging
 import os
+import subprocess
 import sys
 
 __author__ = 'Erinn Looney-Triggs'
@@ -117,7 +120,7 @@ __credits__ = ['Erinn Looney-Triggs', 'Justin Ellison', 'Harald Jensas' ]
 __license__ = 'GPL 3.0'
 __maintainer__ = 'Erinn Looney-Triggs'
 __email__ = 'erinn.looneytriggs@gmail.com'
-__version__ = '3.0.1'
+__version__ = '3.0.2'
 __status__ = 'Production'
 
 #Nagios exit codes in English
@@ -129,8 +132,9 @@ OK       = 0
 
     
 def extract_mtk_community():
-    # Get SNMP community string from /etc/mtk.conf
-
+    '''
+    Get SNMP community string from /etc/mtk.conf
+    '''
     mtk_conf_file = '/etc/mtk.conf'
     
     if os.path.isfile(mtk_conf_file):
@@ -173,12 +177,10 @@ def extract_serial_number():
         import libsmbios_c
     except ImportError:
         logger.debug('Unable to load libsmbios_c continuing.')
-        pass                #Module does not exist, move on
     else:
         libsmbios = True
     
     if omreport:
-        import subprocess
         import re
         
         try:
@@ -204,8 +206,7 @@ def extract_serial_number():
         
         serial_numbers.append(libsmbios_c.system_info.get_service_tag())
            
-    elif dmidecode:
-        import subprocess 
+    elif dmidecode: 
         #Gather the information from dmidecode
         
         sudo = which('sudo')
@@ -318,10 +319,12 @@ def extract_serial_number_snmp( options ):
         for enclosure_id in enclosure_ids:
             
             #For backwards compatibility with OM 5.3
-            if not enclosure_id: continue
+            if not enclosure_id: 
+                continue
             
             var = netsnmp.VarList(netsnmp.Varbind('SNMPv2-SMI::enterprises',
-                                                  '.674.10893.1.20.130.3.1.16.{0}'.format(enclosure_id)))
+                                                  '.674.10893.1.20.130.3.1.',
+                                                  '16.{0}'.format(enclosure_id)))
             
             enclosure_type = session.get(var)[0]
             
@@ -433,10 +436,10 @@ def get_warranty(serial_numbers):
                      'website.'.format(thread_id))
         #Build the cookie configuration
         urlopen = urllib2.urlopen
-        cj = cookielib.CookieJar()
-        Request = urllib2.Request
+        cookiejar = cookielib.CookieJar()
+        request = urllib2.Request
         
-        opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
+        opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cookiejar))
         urllib2.install_opener(opener)
         
         logger.debug('Thread ID: {0}, building cookie.'.format(thread_id))
@@ -451,7 +454,7 @@ def get_warranty(serial_numbers):
                                   path_specified=True, secure=False, 
                                   expires=None, discard=True, comment=None, 
                                   comment_url=None, rest={'HttpOnly': None})
-        cj.set_cookie(cookie)
+        cookiejar.set_cookie(cookie)
         
         logger.debug('Thread ID: {0}, cookie created with value: '
                      '{1}.'.format(thread_id, cookie.value))
@@ -470,7 +473,7 @@ def get_warranty(serial_numbers):
             logger.debug('Thread ID: {0}, requesting data from URL: {1},'
                          ' with headers {2}.'.format(thread_id, dell_url, 
                                                      txheaders))
-            req = Request(dell_url, txdata, txheaders)
+            req = request(dell_url, txdata, txheaders)
             response = urlopen(req)
         except urllib2.URLError, error:
             if hasattr(error, 'reason'):
@@ -483,7 +486,7 @@ def get_warranty(serial_numbers):
                 sys.exit(UNKNOWN)  
         
         #Just to be tidy
-        cj.clear()
+        cookiejar.clear()
         
         list_write_mutex.acquire()      #Acquire our lock to write to the list
         result_list.append((regex.findall(response.read()), serial_number))
@@ -522,8 +525,8 @@ def parse_exit(result_list, short_output=False):
     
     def i8n_date(date):
         ''' Simple function that takes a North American style date string
-        seperated by '/'s and converts it to ISO standard date format
-        of yyy-mm-dd and returns it.
+        seperated by '/', '.' and '-' and converts it to ISO standard date
+        format of yyy-mm-dd and returns it.
         '''
         
         logger.debug('Converting date: {0}'.format(date))
@@ -532,8 +535,8 @@ def parse_exit(result_list, short_output=False):
         if "." in date:
             day, month, year = date.split('.')
         elif "-" in date:
-	    day, month, year = date.split('-')
-	else:
+            day, month, year = date.split('-')
+        else:
             month, day, year = date.split('/')
         
         return datetime.date(int(year), int(month), int(day))
@@ -677,7 +680,7 @@ thirty days remaining and critical when there is less than ten days
 remaining. These values can be adjusted using the command line, see --help.
 ''',
                                    prog="check_dell_warranty",
-                                   version="%prog Version: 3.0.1")
+                                   version="%prog Version: 3.0.2")
     parser.add_option('-a', dest='authProtocol', action='store',
                       help=('Set the default authentication protocol for '
                             'SNMPv3 (MD5 or SHA).'))
