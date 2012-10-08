@@ -114,7 +114,7 @@ __credits__ = ['Erinn Looney-Triggs', 'Justin Ellison', 'Harald Jensas' ]
 __license__ = 'GPL 3.0'
 __maintainer__ = 'Erinn Looney-Triggs'
 __email__ = 'erinn.looneytriggs@gmail.com'
-__version__ = 3.0.1
+__version__ = '3.0.1'
 __status__ = 'Production'
 
 #Nagios exit codes in English
