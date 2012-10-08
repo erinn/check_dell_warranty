@@ -19,9 +19,12 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 #
 # Revision history:
 #
-# 2012-10-27: 3.0.1 Dell dropped the counter for days left from their site, 
+# 2012-10-27 3.0.1: Dell dropped the counter for days left from their site, 
 # this is now calculated internally. Add patch for european style dates
 # with periods between that numbers.
+#
+# 2012-09-05 3.0: Use Net-SNMP bindings for python allowing SNMPv3 support. Add
+# debugging output using -V, Small cleanups.
 #
 # 2012-08-23 2.2.3: Merge in patch from Colin Panisset to dedup serials before
 # mutex is created
