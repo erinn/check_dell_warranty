@@ -531,7 +531,9 @@ def parse_exit(result_list, short_output=False):
         #Support European Dell server date formats
         if "." in date:
             day, month, year = date.split('.')
-        else:
+        elif "-" in date:
+	    day, month, year = date.split('-')
+	else:
             month, day, year = date.split('/')
         
         return datetime.date(int(year), int(month), int(day))
