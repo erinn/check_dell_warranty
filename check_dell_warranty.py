@@ -260,7 +260,7 @@ def extract_serial_number_snmp( options ):
     version = options.version           
     
     logger.debug('Obtaining serial number via SNMP '
-                 'version: {0}'.format(version))
+                 'version: {0}.'.format(version))
     
     if version == 3:
         sec_level = options.secLevel
