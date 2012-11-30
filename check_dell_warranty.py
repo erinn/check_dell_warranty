@@ -736,7 +736,7 @@ remaining. These values can be adjusted using the command line, see --help.
     parser.add_option('-u', dest='secName', action='store',
                       help='Set the SNMPv3 security name (user name).')
     parser.add_option('-v', dest='version', default=3, action='store',
-                      help=('Specify the SNMP version (1, 2c, 3) Default: 3'),
+                      help=('Specify the SNMP version (1, 2, 3) Default: 3'),
                       type='int'
                       )
     parser.add_option('-V', dest='verbose', action='store_true', 
