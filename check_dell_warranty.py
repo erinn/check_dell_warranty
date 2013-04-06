@@ -7,10 +7,10 @@ when there is less than ten days remaining. These values can be adjusted
 using the command line, see --help.
 
                                                  
-Version: 3.0.2                                                                
+Version: 4.0                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
-Revised: 2012-10-08                                                                
+Revised: 2013-03-04                                                                
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 '''
 
@@ -110,6 +110,7 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 #                                       
 #=============================================================================
 
+from lxml import etree
 import logging
 import os
 import subprocess
@@ -120,7 +121,9 @@ __credits__ = ['Erinn Looney-Triggs', 'Justin Ellison', 'Harald Jensas' ]
 __license__ = 'GPL 3.0'
 __maintainer__ = 'Erinn Looney-Triggs'
 __email__ = 'erinn.looneytriggs@gmail.com'
-__version__ = '3.0.2'
+__version__ = '4.0'
+__date__ = '2009-02-12'
+__revised__ = '2013-03-04'
 __status__ = 'Production'
 
 #Nagios exit codes in English
@@ -129,8 +132,9 @@ CRITICAL = 2
 WARNING  = 1
 OK       = 0
 
+#One of the name spaces that Dell uses.
+NS = '{http://schemas.datacontract.org/2004/07/Dell.AWR.Domain.Asset}'
 
-    
 def extract_mtk_community():
     '''
     Get SNMP community string from /etc/mtk.conf
@@ -392,191 +396,93 @@ def extract_serial_number_snmp( options ):
 #            #   9: Dell MD1120
 
 
-def get_warranty(serial_numbers):
+def get_warranty_https(serial_numbers):
     '''
     Obtains the warranty information from Dell's website. This function 
     expects a list containing one or more serial numbers to be checked
     against Dell's database.
     '''
     
-    import cookielib
-    import re
-    import thread
-    import time
-    import urllib2
+    import requests
     
-    # Remove duplicates:
-    if len( serial_numbers ) > 1:
-        serial_numbers = dict.keys(dict.fromkeys(serial_numbers))
-    
-    thread_id = 0
-    result_list = []
-    list_write_mutex = thread.allocate_lock()
-    
-    # Remove duplicates:
-    if len( serial_numbers ) > 1:
-        serial_numbers = dict.keys(dict.fromkeys(serial_numbers))
-    
-    exit_mutexes = [0] * len(serial_numbers)
-    
-    #The URL to Dell's site
-    dell_url = ('https://www.dell.com/support/troubleshooting/us/en/04/'
-                'TroubleShooting/Display_Warranty_Tab?name='
-                'TroubleShooting_WarrantyTab')
-    
-    pattern = r"""(                         #Capture
-                  <table                    #Beginning of table
-                  .*?                       #Non-greedy match
-                  class="uif_table.*?"         #Get the right table
-                  .*?                       #Non-greedy match
-                  </table>)"""              #Closing tag
-                              
-    regex = re.compile(pattern, re.X)
-    
-    def fetch_result(thread_id, serial_number, dell_url, regex):
-        '''Opens a connection to Dell's website and fetches the output
-        of the page using the regex that is passed in. This function
-        expects to be used in a threaded setup as such it requires 
-        a thread id. In addition the serial number to be used needs to be
-        passed as well as the url and the regex to pull the info.
-        '''
-        
-        logger.debug('Thread ID: {0}, beginning connection to '
-                     'website.'.format(thread_id))
-        #Build the cookie configuration
-        urlopen = urllib2.urlopen
-        cookiejar = cookielib.CookieJar()
-        request = urllib2.Request
-        
-        opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cookiejar))
-        urllib2.install_opener(opener)
-        
-        logger.debug('Thread ID: {0}, building cookie.'.format(thread_id))
-        
-        #Build the cookie
-        cookie = cookielib.Cookie(version=0, name='OLRProduct', 
-                                  value='OLRProduct=' + serial_number + '|',
-                                  port=None, port_specified=False, 
-                                  domain='.dell.com', 
-                                  domain_specified=True, 
-                                  domain_initial_dot=True, path='/', 
-                                  path_specified=True, secure=False, 
-                                  expires=None, discard=True, comment=None, 
-                                  comment_url=None, rest={'HttpOnly': None})
-        cookiejar.set_cookie(cookie)
-        
-        logger.debug('Thread ID: {0}, cookie created with value: '
-                     '{1}.'.format(thread_id, cookie.value))
-        
-        txdata = None
-        txheaders =  {'User-agent' : 
-                      'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)'}
-        
-        #Basic check of the serial number.
-        if len( serial_number ) != 7 and len( serial_number ) != 5:
-            print 'Invalid serial number: {0} exiting!'.format(serial_number)
-            sys.exit(WARNING)
-        
-        #Try to open the page, exit on failure
-        try:
-            logger.debug('Thread ID: {0}, requesting data from URL: {1},'
-                         ' with headers {2}.'.format(thread_id, dell_url, 
-                                                     txheaders))
-            req = request(dell_url, txdata, txheaders)
-            response = urlopen(req)
-        except urllib2.URLError, error:
-            if hasattr(error, 'reason'):
-                print ('Unable to open URL: '
-                       '{0} exiting! {1}').format(dell_url, error.reason)
-                sys.exit(UNKNOWN)
-            elif hasattr(error, 'code'):
-                print ('The server is unable to fulfill '
-                'the request, error: {0}').format(error.code)
-                sys.exit(UNKNOWN)  
-        
-        #Just to be tidy
-        cookiejar.clear()
-        
-        list_write_mutex.acquire()      #Acquire our lock to write to the list
-        result_list.append((regex.findall(response.read()), serial_number))
-        
-        list_write_mutex.release()      #Release the lock
-        
-        exit_mutexes[thread_id] = 1     #Communicate that this thread is done
-        
-        thread.exit()                   #Not necessary, but pretty
+    url = 'https://api.dell.com/support/v2/assetinfo/warranty/tags'
+    apikey = '1adecee8a60444738f280aad1cd87d0e'
+    responses = {}
     
     for serial_number in serial_numbers:
-        thread.start_new(fetch_result, (thread_id, serial_number, 
-                                        dell_url, regex))
-        thread_id += 1
+        payload = {'svctags': serial_number, 'apikey': apikey}
+        
+        responses[serial_number] = requests.get(url, params=payload, 
+                                                verify=True)
+        logger.debug('Requesting warranty information for service '
+                     'tag: {0}, from url: '
+                     '{1}'.format(serial_number, responses[serial_number].url))
     
-    #Check that all threads have exited
-    while 0 in exit_mutexes: 
-        time.sleep(.05)     #Give the CPU a break
-    
-    logger.debug('Number of results obtained from Dell web site: '
-                 '{0}'.format(len(result_list)))
-    
-    return result_list
+    return responses
 
-
-def parse_exit(result_list, short_output=False):
-    '''This parses the results from the get_warranty() function and outputs 
-    the appropriate information.
+def check_http_response_code(responses):
+    '''
+    This function check the return codes of the responses gathered to 
+    determine if everything went ok. We basicaly check if the status code
+    returned is not 200 OK, if it is not we fail.
+    
+    I am sure there are cases we are missing in here, but this is a start.
     '''
     
-    import datetime
-    import re
-    
-    critical = 0
-    warning  = 0
-    
-    def i8n_date(date):
-        ''' Simple function that takes a North American style date string
-        seperated by '/', '.' and '-' and converts it to ISO standard date
-        format of yyy-mm-dd and returns it.
-        '''
-        
-        logger.debug('Converting date: {0}'.format(date))
-        
-        #Support European Dell server date formats
-        if "." in date:
-            day, month, year = date.split('.')
-        elif "-" in date:
-            day, month, year = date.split('-')
+    for key in responses:
+        logger.debug('Checking response code for '
+                     'url: {0}'.format(responses[key].url))
+        if responses[key].status_code != 200:
+            logger.debug('Response code {0} not acceptable, aborting!'
+                         .format(responses[key].status_code))
+            print ('Bad response code: {0}, '
+                  'aborting'.format(responses[key].status_code))
+            sys.exit(UNKNOWN)
         else:
-            month, day, year = date.split('/')
-        
-        return datetime.date(int(year), int(month), int(day))
-        
-    def parse_table(table):
-        '''Takes an HTML string of a table and returns a list of lists of
-        the contents of the table.
-        '''
-        
-        results = []
-        
-        row_pattern     = """<tr>(.*?)</tr>"""
-        table_pattern   = """<td.*?>(.*?)</td>"""
-        row_regex       = re.compile(row_pattern)
-        table_regex     = re.compile(table_pattern)
-        
-        #Pull the rows out
-        rows = row_regex.findall(table)
-        
-        for row in rows:
-            row_list = []
-            tables = table_regex.findall(row)
-            
-            #Clean the tables
-            for table in tables:
-                row_list.append(re.sub(r'<[^>]*?>', '', table))
-            
-            results.append(row_list)
-        
-        return results
+            logger.debug('Response code: {0} received, '
+                         'continuing.'.format(responses[key].status_code))
     
+    return None
+
+def extract_warranties_from_xml(result_dict):
+    '''This function extracts the relevant parts from the results that have
+    been gathered. Because the results are in XML, it is a little less than 
+    easy.
+    '''
+
+    for key in result_dict:
+        logger.debug('Extracting warranty information '
+                     'for service tag: {0}.'.format(key))
+        tree = etree.fromstring(result_dict[key].text, parser=None, 
+                                base_url=None)
+        warranties = tree.findall('.//{0}Warranty'.format(NS))
+        
+        warranty_info = extract_warranty_info(warranties)
+        
+        
+        
+
+def extract_warranty_info(warranties):
+    '''
+    This function extracts the salient info that we want from the XML warranty
+    data that is passed in as a list.
+    '''
+    
+    #These are the tags that we search for in the XML to retreive the values
+    items_to_find =['ServiceLevelDescription', 'ServiceProvider', 'StartDate',
+                    'EndDate']
+    results = []
+    
+    for warranty in warranties:
+        result = []
+        for item in items_to_find:
+            result.append(warranty.find('{0}{1}'.format(NS, item)).text)
+        
+        results.append(result)
+    
+    return results
+
+def parse_exit(result_list):
     for result in result_list:
         days = []
         
@@ -689,7 +595,7 @@ thirty days remaining and critical when there is less than ten days
 remaining. These values can be adjusted using the command line, see --help.
 ''',
                                    prog="check_dell_warranty",
-                                   version="%prog Version: 3.0.2")
+                                   version="%prog Version: {0}".format(__version__))
     parser.add_option('-a', dest='authProtocol', action='store',
                       help=('Set the default authentication protocol for '
                             'SNMPv3 (MD5 or SHA).'))
@@ -705,7 +611,7 @@ remaining. These values can be adjusted using the command line, see --help.
                      '(Default: %default).'), type='int', metavar='<ARG>')
     parser.add_option('-H', '--hostname', action='store', type='string', 
                       dest='hostname', 
-                      help='Specify hostname for SNMP')
+                      help='Specify the host name of the SNMP agent')
     parser.add_option('-l', dest='secLevel', default='noAuthNoPriv',
                       action='store',
                       help=('Set the SNMPv3 security level, (noAuthNoPriv'
@@ -757,6 +663,7 @@ remaining. These values can be adjusted using the command line, see --help.
     logger = logging.getLogger("check_dell_warranty")
     handler = logging.StreamHandler()
     if options.verbose:
+        print 'Switching on debug'
         handler.setLevel(logging.DEBUG)
         logger.setLevel(logging.DEBUG)
         
@@ -776,7 +683,10 @@ remaining. These values can be adjusted using the command line, see --help.
     else:
         SERIAL_NUMBERS = extract_serial_number()
     
-    RESULT = get_warranty(SERIAL_NUMBERS)
+    RESULT = get_warranty_https(SERIAL_NUMBERS)
+    check_http_response_code(RESULT)
+    extract_warranties_from_xml(RESULT)
+    print RESULT
     
     signal.alarm(0)
     
