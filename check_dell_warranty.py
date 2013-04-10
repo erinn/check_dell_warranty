@@ -10,7 +10,7 @@ using the command line, see --help.
 Version: 4.0                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
-Revised: 2013-03-04                                                                
+Revised: 2013-04-09                                                                
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 '''
 
@@ -18,6 +18,8 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 # TODO: omreport md enclosures, cap the threads, tests, more I suppose
 #
 # Revision history:
+# 2013-04-09 4.0: Moved to using api.dell.com and changed out urllib2 in 
+# preference to the requests library.
 #
 # 2012-10-08 3.0.2: Add support for hyphen dates
 #
@@ -110,9 +112,9 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 #                                       
 #=============================================================================
 
-from lxml import etree
+import datetime
 import logging
-import os
+import os    
 import subprocess
 import sys
 
@@ -123,7 +125,7 @@ __maintainer__ = 'Erinn Looney-Triggs'
 __email__ = 'erinn.looneytriggs@gmail.com'
 __version__ = '4.0'
 __date__ = '2009-02-12'
-__revised__ = '2013-03-04'
+__revised__ = '2013-04-09'
 __status__ = 'Production'
 
 #Nagios exit codes in English
@@ -132,30 +134,31 @@ CRITICAL = 2
 WARNING  = 1
 OK       = 0
 
-#One of the name spaces that Dell uses.
-NS = '{http://schemas.datacontract.org/2004/07/Dell.AWR.Domain.Asset}'
+try:
+    import requests
+except ImportError:
+    print ('Python Requests module (http://docs.python-requests.org/) '
+           'is required for this to work.')
+    sys.exit(CRITICAL)
 
 def extract_mtk_community():
     '''
     Get SNMP community string from /etc/mtk.conf
     '''
-    logger.debug('Obtaining serial number via /etc/mtk.conf')
-    
     mtk_conf_file = '/etc/mtk.conf'
+    
+    logger.debug('Obtaining serial number via {0}.'.format(mtk_conf_file))
     
     if os.path.isfile(mtk_conf_file):
         try:
-            conf_file = open(mtk_conf_file, 'r')
+            for line in open(mtk_conf_file, 'r'):
+                token = line.split('=')
+                
+                if token[0] == 'community_string':
+                    community_string = token[1].strip()
         except IOError:
             print 'Unable to open {0}, exiting!'.format(mtk_conf_file)
             sys.exit(UNKNOWN)
-            
-            #Iterate over the file and search for the community_string   
-        for line in conf_file:
-            token = line.split('=')
-            if token[0] == 'community_string':
-                community_string = token[1].strip()
-            conf_file.close()
     else:
         print ('The {0} file does not exist, '
                'exiting!').format(mtk_conf_file)
@@ -163,7 +166,7 @@ def extract_mtk_community():
         
     return community_string
 
-def extract_serial_number():
+def extract_service_tag():
     '''Extracts the serial number from the localhost using (in order of
     precedence) omreport, libsmbios, or dmidecode. This function takes 
     no arguments but expects omreport, libsmbios or dmidecode to exist 
@@ -175,7 +178,7 @@ def extract_serial_number():
     dmidecode = which('dmidecode')
     libsmbios = False
     omreport  = which('omreport')
-    serial_numbers = []
+    service_tags = []
     
     #Test for the libsmbios module
     try:
@@ -203,10 +206,10 @@ def extract_serial_number():
         text = process.stdout.read()
         pattern = '''<ServiceTag>(\S+)</ServiceTag>'''
         regex = re.compile(pattern, re.X)
-        serial_numbers = regex.findall(text)
+        service_tags = regex.findall(text)
         
     elif libsmbios:
-        logger.debug('Obtaining serial number via libsmbios.')
+        logger.debug('Obtaining serial number via libsmbios_c.')
         
         #You have to be root to extract the serial number via this method
         if os.geteuid() != 0: 
@@ -214,8 +217,8 @@ def extract_serial_number():
             'libsmbios, exiting!').format(sys.argv[0])
             sys.exit(WARNING)
         
-        serial_numbers.append(libsmbios_c.system_info.get_service_tag())
-           
+        service_tags.append(libsmbios_c.system_info.get_service_tag())
+        
     elif dmidecode: 
         logger.debug('Obtaining serial number via dmidecode.')
         #Gather the information from dmidecode
@@ -234,16 +237,17 @@ def extract_serial_number():
         except OSError:
             print 'Error: {0} exiting!'.format(sys.exc_info)
             sys.exit(WARNING)
-        serial_numbers.append(process.stdout.read().strip())
+            
+        service_tags.append(process.stdout.read().strip())
         
     else:
         print ('Omreport, libsmbios and dmidecode are not available in '
         '$PATH, exiting!')
         sys.exit(WARNING)
     
-    return serial_numbers
+    return service_tags
 
-def extract_serial_number_snmp( options ):
+def extract_service_tag_snmp( options ):
     '''
     Extracts the serial number from the a remote host using SNMP.
     This function takes the following arguments: hostname, community, 
@@ -258,7 +262,7 @@ def extract_serial_number_snmp( options ):
         print "Unable to load netsnmp python module, aborting!"
         sys.exit(UNKNOWN)
     
-    serial_numbers = []
+    service_tags = []
     hostname = options.hostname
     port = options.port
     version = options.version           
@@ -353,7 +357,7 @@ def extract_serial_number_snmp( options ):
                 logger.debug('Enclosure Serial Number obtained: {0}'
                               .format(enclosure_serial_number))
                 
-                serial_numbers.append(enclosure_serial_number)
+                service_tags.append(enclosure_serial_number)
                 
         #Get system Service Tag.
         var = netsnmp.VarList(netsnmp.Varbind('SNMPv2-SMI::enterprises',
@@ -377,11 +381,11 @@ def extract_serial_number_snmp( options ):
         logger.debug('PowerConnect serial number obtained: {0}'
                       .format(serial_number))
     
-    serial_numbers.append(serial_number)
+    service_tags.append(serial_number)
     
-    logger.debug('Serial numbers obtained: {0}'.format(serial_numbers))
+    logger.debug('Service_tags obtained: {0}'.format(service_tags))
     
-    return serial_numbers
+    return service_tags
 
 #            
 #            #Get enclosure type.
@@ -396,150 +400,151 @@ def extract_serial_number_snmp( options ):
 #            #   9: Dell MD1120
 
 
-def get_warranty_https(serial_numbers):
+def get_warranty_https(service_tag_list, timeout):
     '''
     Obtains the warranty information from Dell's website. This function 
     expects a list containing one or more serial numbers to be checked
     against Dell's database.
     '''
     
-    import requests
-    
-    url = 'https://api.dell.com/support/v2/assetinfo/warranty/tags'
+    url = 'https://api.dell.com/support/v2/assetinfo/warranty/tags.json'
     apikey = '1adecee8a60444738f280aad1cd87d0e'
-    responses = {}
     
-    for serial_number in serial_numbers:
-        payload = {'svctags': serial_number, 'apikey': apikey}
-        
-        responses[serial_number] = requests.get(url, params=payload, 
-                                                verify=True)
-        logger.debug('Requesting warranty information for service '
-                     'tag: {0}, from url: '
-                     '{1}'.format(serial_number, responses[serial_number].url))
+    service_tags = ''
     
-    return responses
+    if len(service_tag_list) == 1:
+        service_tags = service_tag_list[0]
+    else:
+        for service_tag in service_tag_list:
+            service_tags += service_tag + '|'
+    
+    #Because we can't have a trailing '|'
+    service_tags = service_tags.rstrip('|')
+    
+    logger.debug('Requesting service tags: {0}'.format(service_tags))
+    
+    payload = {'svctags': service_tags, 'apikey': apikey}
+    
+    response = requests.get(url, params=payload, verify=True, timeout=timeout)
+    try:
+        #Throw an exception for anything but 200 response code
+        response.raise_for_status()
+    except requests.exceptions.HTTPError:
+        print 'Unable to contact url: {0}.format(url)'
+        sys.exit(UNKNOWN)
+    
+    logger.debug('Requesting warranty information from Dell url: '
+                 '{0}'.format(response.url))
+    
+    result = response.json()
+    
+    logger.debug('Raw output received: \n {0}'.format(result))
+    return result
 
-def check_http_response_code(responses):
+def build_warranty_line(warranty, full_line, days, short_output):
+    description = warranty['ServiceLevelDescription']
+    end_date = warranty['EndDate']
+    start_date = warranty['StartDate']
+    provider = warranty['ServiceProvider']
+    
+    logger.debug('Found: Start date: {0}, End Date: {1}, '
+                 'Description: {2}, '
+                 'Provider: {3}'.format(start_date, end_date, 
+                                        description, provider))
+    
+    #Because we need ot be able to calculate the time left as well as
+    #better formatting.
+    start_date = convert_date(start_date)
+    end_date = convert_date(end_date)
+    
+    days_left = (end_date - datetime.date.today()).days
+    
+    #Because no one cares about egative numbers of days.
+    if days_left < 0:
+        days_left = 0
+        
+    logger.debug('Number of days left in warranty: '
+                 '{0}'.format(days_left))
+    
+    if short_output:
+        full_line = full_line + ', End: ' + str(end_date) \
+        + ', Days left: ' + str(days_left)
+    
+    else: 
+        full_line = full_line + ' Warranty: ' + description \
+        + ', Provider: ' + provider + ', Start: ' + \
+        str(start_date) + ', End: ' + str(end_date) + \
+        ', Days left: ' + str(days_left)
+    
+    days.append(int(days_left))
+    
+    return full_line, days
+
+def convert_date(date):
     '''
-    This function check the return codes of the responses gathered to 
-    determine if everything went ok. We basicaly check if the status code
-    returned is not 200 OK, if it is not we fail.
-    
-    I am sure there are cases we are missing in here, but this is a start.
+    This function converts the date as returned by the Dell API into a 
+    datetime object. Dell's API format is as follows: 2010-07-01T01:00:00
     '''
+    year, month, day = date.split('T')[0].split('-')
     
-    for key in responses:
-        logger.debug('Checking response code for '
-                     'url: {0}'.format(responses[key].url))
-        if responses[key].status_code != 200:
-            logger.debug('Response code {0} not acceptable, aborting!'
-                         .format(responses[key].status_code))
-            print ('Bad response code: {0}, '
-                  'aborting'.format(responses[key].status_code))
-            sys.exit(UNKNOWN)
-        else:
-            logger.debug('Response code: {0} received, '
-                         'continuing.'.format(responses[key].status_code))
+    return datetime.date(int(year), int(month), int(day))
+
+def process_asset(asset, full_line, days, short_output):
+    logger.debug('Raw asset being processed: {0}'.format(asset))
+        
+    service_tag = asset['ServiceTag']
+        
+    for warranty in asset['Warranties']['Warranty']:
+        full_line, days = build_warranty_line(warranty, full_line, 
+                                              days, short_output)
     
-    return None
+    return service_tag, full_line, days
 
-def extract_warranties_from_xml(result_dict):
-    '''This function extracts the relevant parts from the results that have
-    been gathered. Because the results are in XML, it is a little less than 
-    easy.
-    '''
-
-    for key in result_dict:
-        logger.debug('Extracting warranty information '
-                     'for service tag: {0}.'.format(key))
-        tree = etree.fromstring(result_dict[key].text, parser=None, 
-                                base_url=None)
-        warranties = tree.findall('.//{0}Warranty'.format(NS))
-        
-        warranty_info = extract_warranty_info(warranties)
-        
-        
-        
-
-def extract_warranty_info(warranties):
-    '''
-    This function extracts the salient info that we want from the XML warranty
-    data that is passed in as a list.
-    '''
+def parse_exit(result, short_output):
     
-    #These are the tags that we search for in the XML to retreive the values
-    items_to_find =['ServiceLevelDescription', 'ServiceProvider', 'StartDate',
-                    'EndDate']
-    results = []
+    critical = 0
+    days = []
+    warning = 0
+    full_line = r'%s: Service Tag: %s'
     
-    for warranty in warranties:
-        result = []
-        for item in items_to_find:
-            result.append(warranty.find('{0}{1}'.format(NS, item)).text)
-        
-        results.append(result)
+    logger.debug('Begining to parse results and construct exit line '
+                 'and code.')
     
-    return results
-
-def parse_exit(result_list):
-    for result in result_list:
-        days = []
+    assets = (result['GetAssetWarrantyResponse']['GetAssetWarrantyResult']
+              ['Response']['DellAsset'])
+    
+    logger.debug('Assets obtained: {0}'.format(assets))
+    
+    #Check if there are multiple assets being provided
+    if isinstance(assets, list):
+        for asset in assets:
+            service_tag, full_line, days = process_asset(asset, full_line, 
+                                                         days, short_output)
+    
+    #There is only one asset
+    else:
+        asset = assets
+        service_tag, full_line, days = process_asset(asset, full_line, 
+                                                     days, short_output)
+    
+    #Put the days remaining in ascending order
+    days.sort()
+    
+    logger.debug('Days remaining on warranties: {0}'.format(days))
+    
+    if days[-1] < options.critical_days:
+        state = 'CRITICAL'
+        critical += 1
         
-        serial_number = result[1]
-
-        #We start to build our output line
-        full_line = r'%s: Service Tag: %s' 
+    elif days[-1] < options.warning_days:
+        state = 'WARNING'
+        warning += 1
         
-        if len(result[0]) == 0:
-            print "Dell's database appears to be down."
-            sys.exit(WARNING)
+    else:
+        state = 'OK'
         
-        for match in result[0]:
-            
-            #Because there can be multiple warranties for one system we get
-            #them all
-            warranties = parse_table(match)
-            
-            for entry in warranties:
-                (description, provider, start_date, end_date) = entry[0:4]
-                 
-                
-                #Convert the dates to international standard
-                start_date = i8n_date(start_date)
-                end_date   = i8n_date(end_date)
-                
-                #Calculate the days remaining
-                days_left = (end_date - datetime.date.today()).days
-                
-                if short_output:
-                    full_line = full_line + ', End: ' + str(end_date) \
-                    + ', Days left: ' + str(days_left)
-                    
-                else: 
-                    full_line = full_line + ' Warranty: ' + description \
-                    + ', Provider: ' + provider + ', Start: ' + \
-                    str(start_date) + ', End: ' + str(end_date) + \
-                    ', Days left: ' + str(days_left)
-                
-                days.append(int(days_left))
-        
-        #Put the days remaining in ascending order
-        days.sort()
-        
-        if days[-1] < options.critical_days:
-            state = 'CRITICAL'
-            critical += 1
-            
-        elif days[-1] < options.warning_days:
-            state = 'WARNING'
-            warning += 1
-            
-        else:
-            state = 'OK'
-            
-        print full_line % (state, serial_number),
-        
+    print full_line % (state, service_tag),
+    
     if critical:
         sys.exit(CRITICAL)
     elif warning:
@@ -626,7 +631,7 @@ remaining. These values can be adjusted using the command line, see --help.
     parser.add_option('-p', '--port', dest='port', default=161,
                       help=('Set the SNMP port to be connected to '
                       '(Default:161).'), type='int')
-    parser.add_option('-s', '--serial-number', dest='serial_number', 
+    parser.add_option('-s', '--service_tag', dest='service_tag', 
                        help=('Dell Service Tag of system, to enter more than '
                       'one use multiple flags (Default: auto-detected)'),  
                       action='append', metavar='<ARG>')
@@ -663,7 +668,7 @@ remaining. These values can be adjusted using the command line, see --help.
     logger = logging.getLogger("check_dell_warranty")
     handler = logging.StreamHandler()
     if options.verbose:
-        print 'Switching on debug'
+        sys.stderr.write('Switching on debug mode.\n')
         handler.setLevel(logging.DEBUG)
         logger.setLevel(logging.DEBUG)
         
@@ -676,18 +681,14 @@ remaining. These values can be adjusted using the command line, see --help.
     signal.signal(signal.SIGALRM, sigalarm_handler)
     signal.alarm(options.timeout)
     
-    if options.serial_number:
-        SERIAL_NUMBERS = options.serial_number
+    if options.service_tag:
+        SERVICE_TAGS = options.service_tag
     elif options.hostname or options.mtk_installed:
-        SERIAL_NUMBERS = extract_serial_number_snmp(options)
+        SERVICE_TAGS = extract_service_tag_snmp(options)
     else:
-        SERIAL_NUMBERS = extract_serial_number()
+        SERVICE_TAGS = extract_service_tag()
     
-    RESULT = get_warranty_https(SERIAL_NUMBERS)
-    check_http_response_code(RESULT)
-    extract_warranties_from_xml(RESULT)
-    print RESULT
-    
+    RESULT = get_warranty_https(SERVICE_TAGS, options.timeout)
     signal.alarm(0)
     
     parse_exit(RESULT, options.short_output)
