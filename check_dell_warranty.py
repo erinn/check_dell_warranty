@@ -408,6 +408,10 @@ def get_warranty_https(service_tag_list, timeout):
     '''
     
     url = 'https://api.dell.com/support/v2/assetinfo/warranty/tags.json'
+    #Additional API keys, just in case: 
+    #d676cf6e1e0ceb8fd14e8cb69acd812d
+    #849e027f476027a394edd656eaef4842
+    
     apikey = '1adecee8a60444738f280aad1cd87d0e'
     
     service_tags = ''
@@ -437,20 +441,52 @@ def get_warranty_https(service_tag_list, timeout):
                  '{0}'.format(response.url))
     
     result = response.json()
-    
     logger.debug('Raw output received: \n {0}'.format(result))
+    
+    #We test for any faults assserted by the api.
+    check_faults(result)
+    
     return result
 
+def check_faults(response):
+    '''
+    This function checks the json content for faults that are rasied by Dell's
+    API. Any faults results in immediate termination with status UNKNOWN.
+    '''
+    
+    logger.debug('Testing for faults in json response.')
+    fault = (response['GetAssetWarrantyResponse']['GetAssetWarrantyResult']
+             ['Faults'])
+    logger.debug('Raw fault return: {0}'.format(fault))
+    
+    if fault:
+        logger.debug('Fault found.')
+        
+        code = fault['FaultException']['Code']
+        message = fault['FaultException']['Message']
+        
+        print ('API fault code: "{0}" encountered, message: "{1}". '
+               'Exiting!'.format(code, message))
+        sys.exit(UNKNOWN)
+    
+    logger.debug('No faults found.')
+    return None
+    
 def build_warranty_line(warranty, full_line, days, short_output):
+    '''
+    This function takes a warranty object and parses the salient information
+    out. It then calculates the number of days remaining in the warranty 
+    period, and builds a line for Nagios outputting.
+    '''
+    
     description = warranty['ServiceLevelDescription']
     end_date = warranty['EndDate']
     start_date = warranty['StartDate']
     provider = warranty['ServiceProvider']
     
-    logger.debug('Found: Start date: {0}, End Date: {1}, '
-                 'Description: {2}, '
-                 'Provider: {3}'.format(start_date, end_date, 
-                                        description, provider))
+    logger.debug('Found: Start date: {0}, End Date: {1},Description: {2}, '
+                 'Provider: {3}'.format(start_date, end_date, description, 
+                                        provider))
     
     #Because we need ot be able to calculate the time left as well as
     #better formatting.
@@ -485,11 +521,19 @@ def convert_date(date):
     This function converts the date as returned by the Dell API into a 
     datetime object. Dell's API format is as follows: 2010-07-01T01:00:00
     '''
+    #Split on 'T' grab the date then split it out on '-'
     year, month, day = date.split('T')[0].split('-')
     
     return datetime.date(int(year), int(month), int(day))
 
 def process_asset(asset, full_line, days, short_output):
+    '''
+    This function processes a json asset returned from Dell's API and
+    builds a line appropriate for Nagios output, as well as the service
+    tag for the line and the number of days remaining for each warranty
+    as a list.
+    '''
+    
     logger.debug('Raw asset being processed: {0}'.format(asset))
         
     service_tag = asset['ServiceTag']
@@ -507,7 +551,7 @@ def parse_exit(result, short_output):
     warning = 0
     full_line = r'%s: Service Tag: %s'
     
-    logger.debug('Begining to parse results and construct exit line '
+    logger.debug('Beginning to parse results and construct exit line '
                  'and code.')
     
     assets = (result['GetAssetWarrantyResponse']['GetAssetWarrantyResult']
@@ -517,12 +561,15 @@ def parse_exit(result, short_output):
     
     #Check if there are multiple assets being provided
     if isinstance(assets, list):
+        logger.debug('Multiple assets being processed.')
+        
         for asset in assets:
             service_tag, full_line, days = process_asset(asset, full_line, 
                                                          days, short_output)
     
     #There is only one asset
     else:
+        logger.debug('A single asset is being processed.')
         asset = assets
         service_tag, full_line, days = process_asset(asset, full_line, 
                                                      days, short_output)
