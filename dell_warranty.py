@@ -3,7 +3,7 @@ Created on May 2, 2013
 
 @author: erinn
 '''
-
+import datetime
 import requests
 
 class DellWarrantyException(Exception):
@@ -44,9 +44,17 @@ class warranty(object):
         #logger.debug('No faults found.')
         return None
 
+    def _convert_date(self, date):
+        '''
+        This function converts the date as returned by the Dell API into a 
+        datetime object. Dell's API format is as follows: 2010-07-01T01:00:00
+        '''
+        #Split on 'T' grab the date then split it out on '-'
+        year, month, day = date.split('T')[0].split('-')
+        
+        return datetime.date(int(year), int(month), int(day))
     
-    def get(self):
-
+    def get(self, timeout=30):
         '''
         Obtains the warranty information from Dell's website. This function 
         expects a list containing one or more serial numbers to be checked
@@ -61,7 +69,6 @@ class warranty(object):
         #849e027f476027a394edd656eaef4842
         
         apikey = '1adecee8a60444738f280aad1cd87d0e'
-        timeout = 30
         
         #logger.debug('Requesting service tags: {0}'.format(service_tags))
         
@@ -88,11 +95,10 @@ class warranty(object):
         
         response = requests.get(url, params=payload, verify=True, 
                                 timeout=timeout)
-        try:
-            #Throw an exception for anything but 200 response code
-            response.raise_for_status()
-        except requests.exceptions.HTTPError:
-            print 'Unable to contact url: {0}.format(url)'
+        
+        #Raise requests.exceptions.HTTPError if return is anything but 200
+        response.raise_for_status()
+
         
         return response
     
