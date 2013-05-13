@@ -9,16 +9,16 @@ import requests
 class DellWarrantyException(Exception):
     pass
 
-class warranty(object):
+class system(object):
     '''
     classdocs
     '''
 
-    def __init__(self, serviceTag):
+    def __init__(self, ServiceTag):
         '''
         Constructor
         '''
-        self.serviceTag = serviceTag
+        self.ServiceTag = ServiceTag
     
     def _check_response_faults(self, response):
         '''
@@ -72,7 +72,7 @@ class warranty(object):
         
         #logger.debug('Requesting service tags: {0}'.format(service_tags))
         
-        payload = {'svctags': self.serviceTag, 'apikey': apikey}
+        payload = {'svctags': self.ServiceTag, 'apikey': apikey}
         
         #logger.debug('Requesting warranty information from Dell url: '
         #             '{0}'.format(response.url))
@@ -83,6 +83,7 @@ class warranty(object):
         #DellWarrantyException when a fault is encountered, accepts json only
         self._check_response_faults(self._json_reponse.json())
         
+        self._parse_json_response(self._json_reponse.json())
         #logger.debug('Raw output received: \n {0}'.format(result))
         self._xml_response = self._get_https(xml_url, payload, timeout)
         
@@ -93,7 +94,7 @@ class warranty(object):
     
     def _get_https(self, url, payload, timeout):
         
-        response = requests.get(url, params=payload, verify=True, 
+        response = requests.get(url, params=payload, verify=False, 
                                 timeout=timeout)
         
         #Raise requests.exceptions.HTTPError if return is anything but 200
@@ -102,6 +103,20 @@ class warranty(object):
         
         return response
     
+    def _parse_json_response(self, response):
+        '''
+        Method to parse out the details we want to use an return.
+        '''
+        
+        #Strip out the unneeded information.
+        response = (response['GetAssetWarrantyResponse']
+                    ['GetAssetWarrantyResult']['Response']['DellAsset'])
+        
+        self.MachineDescription = response['MachineDescription']
+        self.OrderNumber = response['OrderNumber']
+        self.ShipDate = response['ShipDate']
+        self.Warranties = response['Warranties']['Warranty']
+         
     def json(self):
         
         return self._json_reponse.json()
@@ -109,6 +124,12 @@ class warranty(object):
     def json_raw(self):
         
         return self._json_reponse.text
+    
+    def type(self):
+        '''
+        Return the system type.
+        '''
+        
     
     def xml_etree(self):
         from xml.etree import cElementTree as et

@@ -432,7 +432,7 @@ def get_warranty_https(service_tag_list, timeout):
     payload = {'svctags': service_tags, 'apikey': apikey}
     
     try:
-        response = requests.get(url, params=payload, verify=True, 
+        response = requests.get(url, params=payload, verify=False, 
                                 timeout=timeout)
         
     except requests.exceptions.SSLError:
