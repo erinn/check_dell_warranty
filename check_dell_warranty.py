@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 '''
 Nagios plug-in to pull the Dell service tag and check it 
 against Dell's web site to see how many days remain. By default it 
@@ -7,10 +7,10 @@ when there is less than ten days remaining. These values can be adjusted
 using the command line, see --help.
 
                                                  
-Version: 4.1                                                                
+Version: 4.2                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
-Revised: 2013-05-13                                                                
+Revised: 2013-11-04                                                                
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 '''
 
@@ -18,6 +18,9 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 # TODO: omreport md enclosures, cap the threads, tests, more I suppose
 #
 # Revision history:
+#
+# 2013-11-04 4.2: Minor documentation updates.
+#
 # 2013-05-13 4.1: Catch SSL exceptions from requests module.
 #
 # 2013-04-09 4.0: Moved to using api.dell.com and changed out urllib2 in 
@@ -125,9 +128,9 @@ __credits__ = ['Erinn Looney-Triggs', 'Justin Ellison', 'Harald Jensas' ]
 __license__ = 'GPL 3.0'
 __maintainer__ = 'Erinn Looney-Triggs'
 __email__ = 'erinn.looneytriggs@gmail.com'
-__version__ = '4.1'
+__version__ = '4.2'
 __date__ = '2009-02-12'
-__revised__ = '2013-05-13'
+__revised__ = '2013-11-04'
 __status__ = 'Production'
 
 #Nagios exit codes in English
@@ -554,6 +557,11 @@ def process_asset(asset, full_line, days, short_output):
     return service_tag, full_line, days
 
 def parse_exit(result, short_output):
+    '''
+    This function parses all the gathered data and exits the program with
+    the appropriate rturn code. It expect a list of results and a boolean
+    for short_output.
+    '''
     
     critical = 0
     days = []
