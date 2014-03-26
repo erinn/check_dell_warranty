@@ -7,10 +7,10 @@ when there is less than ten days remaining. These values can be adjusted
 using the command line, see --help.
 
                                                  
-Version: 4.2                                                                
+Version: 4.4                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
-Revised: 2013-11-04                                                                
+Revised: 2014-03-26                                                                
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 '''
 
@@ -18,6 +18,12 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 # TODO: omreport md enclosures, cap the threads, tests, more I suppose
 #
 # Revision history:
+#
+# 2014-03-26 4.4: Fix for single warranty return issue, thanks actually to 
+# many people for sending in the same patch, sorry it took a bit, I was on 
+# an extended vacation.
+#
+# 2013-11-07 4.3: Code cleanup thanks to Will Yardley.
 #
 # 2013-11-04 4.2: Minor documentation updates.
 #
@@ -77,7 +83,7 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 # 2009-06-25 1.5: Changed optparse to handle multiple serial numbers. Changed
 # the rest of the program to be able to handle multiple serial numbers. Added
 # a de-duper for serial numbers just in case you get two of the same from
-# the command line or as is the case with Dell blades, two of the same
+# the command-line or as is the case with Dell blades, two of the same
 # from omreport. So this ought to handle blades, though I don't have
 # any to test against. 
 # 
@@ -128,9 +134,9 @@ __credits__ = ['Erinn Looney-Triggs', 'Justin Ellison', 'Harald Jensas' ]
 __license__ = 'GPL 3.0'
 __maintainer__ = 'Erinn Looney-Triggs'
 __email__ = 'erinn.looneytriggs@gmail.com'
-__version__ = '4.2'
+__version__ = '4.4'
 __date__ = '2009-02-12'
-__revised__ = '2013-11-04'
+__revised__ = '2014-03-26'
 __status__ = 'Production'
 
 #Nagios exit codes in English
@@ -419,16 +425,8 @@ def get_warranty_https(service_tag_list, timeout):
     
     apikey = '1adecee8a60444738f280aad1cd87d0e'
     
-    service_tags = ''
-    
-    if len(service_tag_list) == 1:
-        service_tags = service_tag_list[0]
-    else:
-        for service_tag in service_tag_list:
-            service_tags += service_tag + '|'
-    
-    #Because we can't have a trailing '|'
-    service_tags = service_tags.rstrip('|')
+    #Format the payload
+    service_tags = '|'.join(service_tag_list)
     
     logger.debug('Requesting service tags: {0}'.format(service_tags))
     
@@ -452,7 +450,12 @@ def get_warranty_https(service_tag_list, timeout):
     logger.debug('Requesting warranty information from Dell url: '
                  '{0}'.format(response.url))
     
-    result = response.json()
+    # Work-around for older versions of 'requests'
+    try: 
+        result = response.json()
+    except TypeError:
+        result = response.json
+
     logger.debug('Raw output received: \n {0}'.format(result))
     
     #We test for any faults assserted by the api.
@@ -479,6 +482,7 @@ def check_faults(response):
         
         print ('API fault code: "{0}" encountered, message: "{1}". '
                'Exiting!'.format(code, message))
+        
         sys.exit(UNKNOWN)
     
     logger.debug('No faults found.')
@@ -549,8 +553,17 @@ def process_asset(asset, full_line, days, short_output):
     logger.debug('Raw asset being processed: {0}'.format(asset))
         
     service_tag = asset['ServiceTag']
-        
-    for warranty in asset['Warranties']['Warranty']:
+
+    # Simple way to deal with similar problem to the multiple assets
+    # problem: if we have only a single warranty for a particular tag,
+    # we have a dict instead of a list of dicts.
+    warranties = list()
+    if isinstance(asset['Warranties']['Warranty'], dict):
+        warranties.append(asset['Warranties']['Warranty'])
+    else:
+        warranties.extend(asset['Warranties']['Warranty'])
+
+    for warranty in warranties:
         full_line, days = build_warranty_line(warranty, full_line, 
                                               days, short_output)
     
