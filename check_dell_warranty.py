@@ -7,10 +7,10 @@ when there is less than ten days remaining. These values can be adjusted
 using the command line, see --help.
 
                                                  
-Version: 4.4                                                                
+Version: 4.5                                                                
 Created: 2009-02-12                                                         
 Author: Erinn Looney-Triggs                                                 
-Revised: 2014-03-26                                                                
+Revised: 2015-03-31                                                                
 Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 '''
 
@@ -18,6 +18,8 @@ Revised by: Erinn Looney-Triggs, Justin Ellison, Harald Jensas
 # TODO: omreport md enclosures, cap the threads, tests, more I suppose
 #
 # Revision history:
+# 2014-03-31 4.5: Fix for encoding issue as well as a formatting fix, thanks to
+# Chris Lewis.
 #
 # 2014-03-26 4.4: Fix for single warranty return issue, thanks actually to 
 # many people for sending in the same patch, sorry it took a bit, I was on 
@@ -134,9 +136,9 @@ __credits__ = ['Erinn Looney-Triggs', 'Justin Ellison', 'Harald Jensas' ]
 __license__ = 'GPL 3.0'
 __maintainer__ = 'Erinn Looney-Triggs'
 __email__ = 'erinn.looneytriggs@gmail.com'
-__version__ = '4.4'
+__version__ = '4.5'
 __date__ = '2009-02-12'
-__revised__ = '2014-03-26'
+__revised__ = '2015-03-31'
 __status__ = 'Production'
 
 #Nagios exit codes in English
@@ -444,7 +446,7 @@ def get_warranty_https(service_tag_list, timeout):
         #Throw an exception for anything but 200 response code
         response.raise_for_status()
     except requests.exceptions.HTTPError:
-        print 'Unable to contact url: {0}.format(url)'
+        print 'Unable to contact url: {0}'.format(url)
         sys.exit(UNKNOWN)
     
     logger.debug('Requesting warranty information from Dell url: '
@@ -495,7 +497,7 @@ def build_warranty_line(warranty, full_line, days, short_output):
     period, and builds a line for Nagios outputting.
     '''
     
-    description = warranty['ServiceLevelDescription']
+    description = warranty['ServiceLevelDescription'].encode('utf8')
     end_date = warranty['EndDate']
     start_date = warranty['StartDate']
     provider = warranty['ServiceProvider']
